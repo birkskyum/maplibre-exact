@@ -11,21 +11,23 @@ use mln_conversion::{Convertible, Error as ConversionError};
 use mln_style::Style;
 use mln_style::conversion::{convert_layer, convert_source};
 use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_util::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use serde_json::Value as Json;
 
 use crate::protocol::{Content, Layer};
 
 /// Brings `style` from `applied` to `desired`, with the images decoded so far
-/// by their paths, and returns what the style then holds of the content and
-/// the errors on the way. What failed to add, or an image still on its way, is
-/// left out, so the next change tries it again.
+/// by their paths, and returns what the style then holds of the content, the
+/// errors on the way, and what mln-rs doesn't draw (terrain). What failed to
+/// add, or an image still on its way, is left out, so the next change tries
+/// it again.
 pub(super) fn apply(
     style: &mut Style,
     applied: &Content,
     desired: &Content,
     decoded: &HashMap<String, PremultipliedImage>,
-) -> (Content, Vec<String>) {
+) -> (Content, Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut held = applied.clone();
 
@@ -152,7 +154,69 @@ pub(super) fn apply(
         .cloned()
         .collect();
     held.hit_padding = desired.hit_padding;
-    (held, errors)
+    let unsupported = apply_roots(style, &mut held, desired, &mut errors);
+    apply_state(style, &mut held, desired, &mut errors);
+    (held, errors, unsupported)
+}
+
+/// Sets the root properties the content changed over the base style's, and
+/// gives back the base style's for those it dropped. Returns what mln-rs
+/// doesn't draw, which stays held so that it is reported once.
+fn apply_roots(style: &mut Style, held: &mut Content, desired: &Content, errors: &mut Vec<String>) -> Vec<String> {
+    let mut unsupported = Vec::new();
+    let dropped: Vec<String> =
+        held.roots.iter().filter(|(name, _)| desired.root(name).is_none()).map(|(name, _)| name.clone()).collect();
+    for name in dropped {
+        held.roots.retain(|(root, _)| *root != name);
+        let base = serde_json::from_str::<Json>(&style.get_json()).ok().and_then(|base| base.get(&name).cloned());
+        if name != "terrain"
+            && let Err(e) = style.set_root_property_json(&name, &base.unwrap_or(Json::Null).to_string())
+        {
+            errors.push(format!("maplibre: {name}: {}", e.message));
+        }
+    }
+    for (name, value) in &desired.roots {
+        if held.root(name) == Some(value) {
+            continue;
+        }
+        held.roots.retain(|(root, _)| root != name);
+        match style.set_root_property_json(name, &value.to_string()) {
+            Ok(()) => held.roots.push((name.clone(), value.clone())),
+            Err(e) if e.kind == ErrorKind::Unsupported => {
+                unsupported.push(format!("maplibre: {name}: {}", e.message));
+                held.roots.push((name.clone(), value.clone()));
+            }
+            Err(e) => errors.push(format!("maplibre: {name}: {}", e.message)),
+        }
+    }
+    unsupported
+}
+
+/// Sets the global state values the content changed, and gives those it
+/// dropped back the defaults the style's `state` gives them.
+fn apply_state(style: &mut Style, held: &mut Content, desired: &Content, errors: &mut Vec<String>) {
+    let dropped: Vec<String> = held
+        .state
+        .iter()
+        .filter(|(name, _)| desired.state_value(name).is_none())
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in dropped {
+        held.state.retain(|(key, _)| *key != name);
+        if let Err(e) = style.set_global_state_property_json(&name, "null") {
+            errors.push(format!("maplibre: state {name}: {}", e.message));
+        }
+    }
+    for (name, value) in &desired.state {
+        if held.state_value(name) == Some(value) {
+            continue;
+        }
+        held.state.retain(|(key, _)| key != name);
+        match style.set_global_state_property_json(name, &value.to_string()) {
+            Ok(()) => held.state.push((name.clone(), value.clone())),
+            Err(e) => errors.push(format!("maplibre: state {name}: {}", e.message)),
+        }
+    }
 }
 
 /// The base style's first layer of type `kind`, which none of the content is.
@@ -297,7 +361,7 @@ mod tests {
     #[test]
     fn content_draws_over_the_base_style_in_order_unless_it_names_a_layer_to_draw_under() {
         let mut style = style();
-        let (held, errors) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
         assert!(style.get_source("points").is_some());
@@ -314,7 +378,7 @@ mod tests {
                           {"id":"city-names","type":"symbol","source":"points"}]}"#,
         );
         let under_labels = r#"{"layers":[{"id":"trail","type":"line","source":"points","beforeType":"symbol"}]}"#;
-        let (_, errors) = apply(&mut style, &Content::default(), &content(under_labels), &HashMap::new());
+        let (_, errors, _) = apply(&mut style, &Content::default(), &content(under_labels), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "trail", "road-names", "city-names"]);
     }
@@ -322,8 +386,8 @@ mod tests {
     #[test]
     fn a_changed_paint_property_is_set_on_the_layer_that_is_there() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
-        let (held, errors) = apply(&mut style, &held, &content(&dots("blue")), &HashMap::new());
+        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors, _) = apply(&mut style, &held, &content(&dots("blue")), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(paint(&style, "dots", "circle-color"), serde_json::json!(["rgba", 0.0, 0.0, 255.0, 1.0]));
         assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
@@ -333,7 +397,7 @@ mod tests {
     #[test]
     fn a_removed_property_goes_back_to_its_default() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
         let without = r#"{"sources":{"points":POINTS},"layers":[
             {"id":"halo","type":"circle","source":"points","beforeId":"labels"},
             {"id":"dots","type":"circle","source":"points"}]}"#
@@ -352,7 +416,7 @@ mod tests {
                     {{"id":"{second}","type":"circle","source":"points"}}]}}"#
             ))
         };
-        let (held, _) = apply(&mut style, &Content::default(), &two("a", "b"), &HashMap::new());
+        let (held, _, _) = apply(&mut style, &Content::default(), &two("a", "b"), &HashMap::new());
         assert_eq!(layers(&style), ["water", "labels", "a", "b"]);
         apply(&mut style, &held, &two("b", "a"), &HashMap::new());
         assert_eq!(layers(&style), ["water", "labels", "b", "a"]);
@@ -361,8 +425,8 @@ mod tests {
     #[test]
     fn content_that_goes_leaves_the_style_as_it_was() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
-        let (held, errors) = apply(&mut style, &held, &Content::default(), &HashMap::new());
+        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors, _) = apply(&mut style, &held, &Content::default(), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "labels"]);
         assert!(style.get_source("points").is_none());
@@ -373,11 +437,11 @@ mod tests {
     fn an_image_comes_in_once_it_is_decoded_and_goes_with_the_content() {
         let mut style = style();
         let pin = content(r#"{"images":{"pin":"assets/pin.png"}}"#);
-        let (held, _) = apply(&mut style, &Content::default(), &pin, &HashMap::new());
+        let (held, _, _) = apply(&mut style, &Content::default(), &pin, &HashMap::new());
         assert!(style.get_image("pin").is_none());
         let decoded =
             HashMap::from([("assets/pin.png".to_owned(), PremultipliedImage::new(mln_util::size::Size::new(4, 4)))]);
-        let (held, errors) = apply(&mut style, &held, &pin, &decoded);
+        let (held, errors, _) = apply(&mut style, &held, &pin, &decoded);
         assert_eq!(errors, Vec::<String>::new());
         assert!(style.get_image("pin").is_some());
         apply(&mut style, &held, &Content::default(), &decoded);
@@ -388,8 +452,36 @@ mod tests {
     fn a_layer_that_fails_is_left_out_and_reported() {
         let mut style = style();
         let bad = r#"{"layers":[{"id":"x","type":"blob"}]}"#;
-        let (held, errors) = apply(&mut style, &Content::default(), &content(bad), &HashMap::new());
+        let (held, errors, _) = apply(&mut style, &Content::default(), &content(bad), &HashMap::new());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(held.layers.is_empty());
+    }
+
+    #[test]
+    fn root_properties_go_over_the_base_styles_and_give_it_back() {
+        let mut style = Style::new(1.0);
+        style.load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"mercator"}}"#);
+        let globe = content(r#"{"projection":{"type":"globe"},"terrain":{"source":"dem"}}"#);
+        let (held, errors, unsupported) = apply(&mut style, &Content::default(), &globe, &HashMap::new());
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(unsupported.len(), 1, "terrain: {unsupported:?}");
+        assert_eq!(style.root_property_json("projection").unwrap().as_deref(), Some(r#"{"type":"globe"}"#));
+        // Terrain is reported once, not again on the next change.
+        let (held, _, unsupported) = apply(&mut style, &held, &globe, &HashMap::new());
+        assert!(unsupported.is_empty());
+        apply(&mut style, &held, &Content::default(), &HashMap::new());
+        assert_eq!(style.root_property_json("projection").unwrap().as_deref(), Some(r#"{"type":"mercator"}"#));
+    }
+
+    #[test]
+    fn state_sets_global_state_and_dropping_it_gives_back_the_default() {
+        let mut style = Style::new(1.0);
+        style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"chosen":{"default":""}}}"#);
+        let (held, errors, _) =
+            apply(&mut style, &Content::default(), &content(r#"{"state":{"chosen":"hb"}}"#), &HashMap::new());
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(style.global_state_json(), r#"{"chosen":"hb"}"#);
+        apply(&mut style, &held, &Content::default(), &HashMap::new());
+        assert_eq!(style.global_state_json(), r#"{"chosen":""}"#);
     }
 }

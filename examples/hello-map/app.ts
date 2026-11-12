@@ -15,16 +15,21 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
 );
 
 // The map's own sources and layers, in the MapLibre Style Specification's
-// terms, the places clustered when zoomed out. The markers turn the compass
-// with the map, and hold the callout over the chosen pin, which is 32 points
-// tall, and the dropped pin.
-const content = (chosen: string, dropped: number[]) => ({
+// terms, the places clustered when zoomed out, and Mapterhorn's elevation
+// shaded under the roads when `relief` is on. The chosen place is global
+// state, which the pins' expression reads. The markers turn the compass with
+// the map, and hold the callout over the chosen pin, which is 32 points tall,
+// and the dropped pin.
+const content = (chosen: string, dropped: number[], globe: boolean, relief: boolean) => ({
   hitPadding: 8,
+  state: { chosen },
+  ...(globe ? { projection: { type: 'globe' } } : {}),
   images: {
     pin: { src: 'assets/pin.png', pixelRatio: 2 },
     'pin-selected': { src: 'assets/pin-selected.png', pixelRatio: 2 },
   },
   sources: {
+    ...(relief ? { relief: { type: 'raster-dem', url: 'https://tiles.mapterhorn.com/tilejson.json' } } : {}),
     walk: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: walk } } },
     places: {
       type: 'geojson',
@@ -42,6 +47,9 @@ const content = (chosen: string, dropped: number[]) => ({
     },
   },
   layers: [
+    ...(relief
+      ? [{ id: 'relief', type: 'hillshade', source: 'relief', beforeType: 'line', paint: { 'hillshade-exaggeration': 0.4 } }]
+      : []),
     {
       id: 'walk',
       type: 'line',
@@ -71,7 +79,7 @@ const content = (chosen: string, dropped: number[]) => ({
       source: 'places',
       filter: ['!', ['has', 'point_count']],
       layout: {
-        'icon-image': ['case', ['==', ['get', 'id'], chosen], 'pin-selected', 'pin'],
+        'icon-image': ['case', ['==', ['get', 'id'], ['global-state', 'chosen']], 'pin-selected', 'pin'],
         'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'text-field': ['get', 'name'],
@@ -101,8 +109,8 @@ const fly = (chosen: string) => {
 };
 
 const sources: Sources = {
-  mapContent: ([chosen, dropped]): Result<'mapContent'> => ({
-    json: JSON.stringify(content(chosen, dropped)),
+  mapContent: ([chosen, dropped, globe, relief]): Result<'mapContent'> => ({
+    json: JSON.stringify(content(chosen, dropped, globe, relief)),
     fly: fly(chosen),
   }),
 };

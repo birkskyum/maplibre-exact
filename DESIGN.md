@@ -41,6 +41,11 @@ the app's state, typed in TypeScript.
   and sources again.
 - Content is applied once the style has loaded, and again after a new style loads, so switching base
   styles keeps it.
+- `projection`, `sky`, `light` and `terrain` set the style's root properties over the base style's,
+  which come back when the content drops them, and `state` sets the values its `global-state`
+  expressions read. What an engine doesn't draw, as mln-rs doesn't draw terrain, is reported in the
+  record's `failure` and an `error` event, and doesn't refuse the canvas, since another engine may
+  draw it.
 - `images` names the app's images that layers use, such as an `icon-image`, by their paths under
   `assets/`. The surface asks Exact for each, decodes it with mln-rs and adds it to the style.
 - A click queries the content's layers at the point, widened by `hitPadding`, and the record's `click`
@@ -108,11 +113,11 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record, with camera `padding` and zoom, pitch and bounds limits in `options` |
 | Styling, switching styles at run time and keeping content | Done, with the `setStyle` command or a new `style` |
 | Clustering | Done, with the GeoJSON source's cluster options and each clicked cluster's expansion zoom |
-| Feature queries and feature state | Not yet |
+| Feature queries and feature state | Clicks query the content's layers; global state in the content's `state` drives expressions, as GL JS's `setGlobalStateProperty` does; no feature state |
 | Images and icons | Done, as content `images` from the app's `assets/`, which Exact delivers to the surface |
 | Markers and popups, as GL JS's `Marker` and `Popup` | Done, as content `markers` holding the canvas's Contract children, tappable and accessible |
 | Controls, the compass, scale bar and attribution | A compass is a Contract child turned as a marker, and the record's `attribution` is text the app shows over the map; no scale bar |
-| Terrain and hillshade | Up to the style; untested on mln-rs |
+| Terrain, hillshade and the globe | Hillshade and color relief layers, and the globe as the content's `projection`; mln-rs draws no 3D terrain, so the content's `terrain` is reported as a failure, without refusing the canvas |
 | Location, offline, requests, snapshotter | Not yet |
 
 ## What Exact would need to change

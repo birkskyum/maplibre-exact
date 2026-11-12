@@ -648,10 +648,17 @@ impl Engine {
             return;
         }
         self.content_changed = false;
-        let (held, errors) = content::apply(self.map.style_mut(), &self.held, &self.applied.content, decoded);
+        let (held, errors, unsupported) =
+            content::apply(self.map.style_mut(), &self.held, &self.applied.content, decoded);
         self.held = held;
-        if let Some(message) = errors.into_iter().reduce(|all, error| format!("{all}; {error}")) {
+        let join = |all: String, error: String| format!("{all}; {error}");
+        if let Some(message) = errors.into_iter().reduce(join) {
             self.fail(message, events);
+        } else if let Some(message) = unsupported.into_iter().reduce(join) {
+            // What the engine doesn't draw, which another engine may: the
+            // app hears of it, and the canvas isn't refused.
+            self.error = Some(message);
+            events.push(Event::Error);
         }
         self.idle = false;
     }

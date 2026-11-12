@@ -109,7 +109,11 @@ impl Inputs {
 /// written from the app's folder as Contract writes them:
 /// `"pin": "assets/pin.png"`, or `{"src": …, "pixelRatio": 2, "sdf": false}`
 /// as GL JS's `addImage` takes them. `markers` places the canvas's children
-/// on the map by their `testId` ([`Marker`]).
+/// on the map by their `testId` ([`Marker`]). `projection`, `sky`, `light`
+/// and `terrain` set those of the style's root properties over the base
+/// style's, which come back when the content drops them, and `state` sets
+/// values that the style's `global-state` expressions read, as GL JS's
+/// `setGlobalStateProperty` does.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Content {
     /// Sources by id.
@@ -123,7 +127,14 @@ pub struct Content {
     pub hit_padding: f64,
     /// Where the canvas's children go on the map.
     pub markers: Vec<Marker>,
+    /// Root properties over the base style's, by name ([`ROOT_PROPERTIES`]).
+    pub roots: Vec<(String, Json)>,
+    /// Global state values by name.
+    pub state: Vec<(String, Json)>,
 }
+
+/// The style's root properties that content can set.
+pub const ROOT_PROPERTIES: [&str; 4] = ["projection", "sky", "light", "terrain"];
 
 /// A child of the map's canvas held at a place on the map, as GL JS's
 /// `Marker` holds an element, with its options: `"markers": {"<testId>":
@@ -351,6 +362,18 @@ impl Content {
             }
             Some(_) => return Err("maplibre: content's markers must be an object of markers by testId".into()),
         }
+        for name in ROOT_PROPERTIES {
+            match object.remove(name) {
+                None | Some(Json::Null) => {}
+                Some(value @ Json::Object(_)) => content.roots.push((name.to_owned(), value)),
+                Some(_) => return Err(format!("maplibre: content's {name} must be an object, as the style's is")),
+            }
+        }
+        match object.remove("state") {
+            None => {}
+            Some(Json::Object(state)) => content.state = state.into_iter().collect(),
+            Some(_) => return Err("maplibre: content's state must be an object of values by name".into()),
+        }
         Ok(content)
     }
 
@@ -358,6 +381,18 @@ impl Content {
     #[must_use]
     pub fn source(&self, id: &str) -> Option<&Json> {
         self.sources.iter().find(|(source, _)| source == id).map(|(_, source)| source)
+    }
+
+    /// The root property `name`, if the content sets it.
+    #[must_use]
+    pub fn root(&self, name: &str) -> Option<&Json> {
+        self.roots.iter().find(|(root, _)| root == name).map(|(_, value)| value)
+    }
+
+    /// The global state value `name`, if the content sets it.
+    #[must_use]
+    pub fn state_value(&self, name: &str) -> Option<&Json> {
+        self.state.iter().find(|(key, _)| key == name).map(|(_, value)| value)
     }
 }
 

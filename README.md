@@ -21,6 +21,8 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
   module builds (`{"sources": {…}, "layers": […], "images": {…}}`), with images from the app's
   `assets/`. The map applies what changed, new GeoJSON data and
   changed paint and layout properties in place and the rest by adding and removing layers and sources.
+  The content can also set the style's `projection` (a globe), `sky`, `light` and `terrain` over the
+  base style's, and values for its `global-state` expressions in `state`.
 - `markers` in the content holds the canvas's children at places on the map, by their `testId`, as GL
   JS's `Marker` holds an element (`{"callout": {"lngLat": [8.54, 47.38], "anchor": "bottom"}}`). A
   marker is the app's own Contract, so it keeps its taps and its accessibility, and Exact reports it
