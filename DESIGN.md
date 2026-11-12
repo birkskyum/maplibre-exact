@@ -69,9 +69,17 @@ Found while building the prototype on exact2 `85c1b9c5`.
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
 
+## Where it runs
+
+- macOS, and iOS on an iPhone 17 Pro (iOS 27.2), from the same build of the surface. On the phone the
+  map took 1.5 ms of GPU time a frame while panning.
+- A phone build needs a development profile for the app's bundle id that includes the phone. Exact
+  uses one that is installed and doesn't create it, so the first time it is made with Xcode's
+  automatic signing (`xcodebuild -allowProvisioningUpdates` on any app target with the bundle id).
+
 ## Not done yet
 
-- The web, iOS, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
+- The web, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - Markers and other app content on the map. Exact lays a canvas's children out over it and lets the
   surface place each one (`Surface::placement`), which would give markers the platform's

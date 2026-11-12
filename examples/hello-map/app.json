@@ -17,12 +17,20 @@
         "width": 900,
         "height": 700
       }
+    },
+    "ios": {
+      "minimumOS": "17.0",
+      "deviceFamily": [
+        "iphone",
+        "ipad"
+      ]
     }
   },
   "deploy": {
     "store": {
       "web": "0",
-      "macos": "0"
+      "macos": "0",
+      "ios": "0"
     }
   }
 }
