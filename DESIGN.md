@@ -2,7 +2,7 @@
 
 ## One contract, any engine
 
-An app sees a canvas surface named `maplibre` with seven named arguments, JSON commands in, event
+An app sees a canvas surface named `maplibre` with eight named arguments, JSON commands in, event
 names out to `message=`, and a record it reads as `exactSurface("maplibre")`
 ([`protocol.rs`](crates/maplibre-exact/src/protocol.rs)). Nothing in it names mln-rs, so an app keeps
 its Contract and data module when the engine under it changes. A camera argument moves the map only
@@ -72,8 +72,8 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 |---|---|
 | Composition, a base style plus declared sources and layers, diffed | Done, as `content` |
 | Layers, with GeoJSON and tiled sources, expressions and `beforeId` | Done, and `beforeType` draws under the base style's first layer of a type, as `Anchor.Below` does |
-| Interaction, with clicks on the map and its layers and hit padding | Done; long press, which gestures do what, and camera limits aren't |
-| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record; camera limits and padding aren't |
+| Interaction, with clicks on the map and its layers and hit padding | Done, and `options` turns off rotating, pitching, scroll zoom or every gesture, keeping clicks; no long press |
+| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record, with zoom, pitch and bounds limits in `options`; no camera padding |
 | Styling, switching styles at run time and keeping content | Done, with the `setStyle` command or a new `style` |
 | Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
 | Feature queries and feature state | Not yet |

@@ -20,6 +20,9 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
   [MapLibre Style Specification](https://maplibre.org/maplibre-style-spec/)'s terms, which the data
   module builds (`{"sources": {…}, "layers": […]}`). The map applies what changed, new GeoJSON data and
   changed paint and layout properties in place and the rest by adding and removing layers and sources.
+- `options` limits the camera and turns gestures off, with GL JS's `MapOptions` names (`minZoom`,
+  `maxZoom`, `minPitch`, `maxPitch`, `maxBounds`, `interactive`, `dragRotate`, `pitchWithRotate`,
+  `touchPitch`, `scrollZoom`).
 - The map posts `load`, `moveend`, `click` and `error` to the canvas's `message=` action.
 - Its record, `exactSurface("maplibre")`, holds the camera at rest, whether everything in view has
   loaded, the last click with the content's features under it, the last error, and the style's

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as Json};
 
 /// The surface's arguments in bind order.
-pub const ARGUMENTS: [&str; 7] = ["style", "longitude", "latitude", "zoom", "bearing", "pitch", "content"];
+pub const ARGUMENTS: [&str; 8] = ["style", "longitude", "latitude", "zoom", "bearing", "pitch", "content", "options"];
 
 /// How many arguments the surface binds.
 pub const ARITY: usize = ARGUMENTS.len();
@@ -36,6 +36,7 @@ pub fn argument_defaults() -> Vec<(&'static str, Value)> {
         ("bearing", Value::Number(0.0)),
         ("pitch", Value::Number(0.0)),
         ("content", Value::from("")),
+        ("options", Value::from("")),
     ]
 }
 
@@ -46,6 +47,7 @@ pub struct Inputs {
     pub style: String,
     pub camera: Camera,
     pub content: Content,
+    pub options: Options,
 }
 
 impl Inputs {
@@ -56,7 +58,7 @@ impl Inputs {
     /// The message names the argument that is missing, of the wrong type or
     /// malformed.
     pub fn from_values(values: &[Value]) -> Result<Inputs, String> {
-        let [style, longitude, latitude, zoom, bearing, pitch, content] = values else {
+        let [style, longitude, latitude, zoom, bearing, pitch, content, options] = values else {
             return Err(format!("maplibre: expected {ARITY} arguments, got {}", values.len()));
         };
         let number = |value: &Value, name: &str| {
@@ -78,6 +80,7 @@ impl Inputs {
                 pitch: number(pitch, "pitch")?,
             },
             content: Content::parse(content.as_str().ok_or("maplibre: content must be text")?)?,
+            options: Options::parse(options.as_str().ok_or("maplibre: options must be text")?)?,
         })
     }
 
@@ -190,6 +193,51 @@ impl Content {
     #[must_use]
     pub fn source(&self, id: &str) -> Option<&Json> {
         self.sources.iter().find(|(source, _)| source == id).map(|(_, source)| source)
+    }
+}
+
+/// Where the camera may go and which gestures move it, as JSON with GL JS's
+/// `MapOptions` names. Each is optional, and an empty text is GL JS's
+/// defaults. Clicks reach the app whatever the gestures do.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Options {
+    pub min_zoom: Option<f64>,
+    pub max_zoom: Option<f64>,
+    pub min_pitch: Option<f64>,
+    pub max_pitch: Option<f64>,
+    /// `[[west, south], [east, north]]`, which the camera's center stays in.
+    pub max_bounds: Option<[[f64; 2]; 2]>,
+    /// Whether gestures move the camera at all.
+    pub interactive: Option<bool>,
+    /// Whether gestures turn the bearing.
+    pub drag_rotate: Option<bool>,
+    /// Whether a drag with the rotating button pitches, and whether two
+    /// fingers moving up or down together pitch. An engine with one pitch
+    /// gesture turns it off when either is false.
+    pub pitch_with_rotate: Option<bool>,
+    pub touch_pitch: Option<bool>,
+    /// Whether a wheel or trackpad scroll zooms.
+    pub scroll_zoom: Option<bool>,
+}
+
+impl Options {
+    /// The options in `text`; empty text is the defaults.
+    ///
+    /// # Errors
+    ///
+    /// The message says what in the text is malformed or not supported.
+    pub fn parse(text: &str) -> Result<Options, String> {
+        if text.trim().is_empty() {
+            return Ok(Options::default());
+        }
+        serde_json::from_str(text).map_err(|e| format!("maplibre: options: {e}"))
+    }
+
+    /// Whether gestures move the camera at all.
+    #[must_use]
+    pub fn interactive(&self) -> bool {
+        self.interactive != Some(false)
     }
 }
 
@@ -359,6 +407,22 @@ mod tests {
         values[0] = Value::from("https://example.com/style.json");
         values[6] = Value::from(content);
         Inputs::from_values(&values)
+    }
+
+    #[test]
+    fn options_take_gl_js_names_and_refuse_others() {
+        let options = Options::parse(r#"{"maxZoom":16,"dragRotate":false,"maxBounds":[[5.9,45.8],[10.5,47.8]]}"#);
+        assert_eq!(
+            options,
+            Ok(Options {
+                max_zoom: Some(16.0),
+                drag_rotate: Some(false),
+                max_bounds: Some([[5.9, 45.8], [10.5, 47.8]]),
+                ..Options::default()
+            })
+        );
+        assert!(Options::parse(r#"{"boxZoom":false}"#).is_err());
+        assert!(Options::default().interactive());
     }
 
     #[test]

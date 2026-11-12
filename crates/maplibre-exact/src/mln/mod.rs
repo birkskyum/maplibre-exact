@@ -18,9 +18,9 @@ use std::rc::Rc;
 
 use exact_gpu::{Frame, InputEvent, PointerPhase, Surface, SurfaceError, Value, wgpu};
 use mln_actor::RunLoop;
-use mln_gestures::{GestureEvent, GestureRecognizer};
+use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
-use mln_map::{AnimationOptions, CameraOptions, Map, MapEvent, MapOptions, UpdateReader};
+use mln_map::{AnimationOptions, BoundOptions, CameraOptions, Map, MapEvent, MapOptions, UpdateReader};
 use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
@@ -28,7 +28,7 @@ use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode
 use mln_util::size::Size;
 use serde_json::Value as Json;
 
-use crate::protocol::{self, Camera, CameraChange, Click, Command, Content, Event, Inputs, Record};
+use crate::protocol::{self, Camera, CameraChange, Click, Command, Content, Event, Inputs, Options, Record};
 
 /// The factory a GPU module's registry names.
 #[must_use]
@@ -72,6 +72,10 @@ struct Engine {
     gestures: GestureRecognizer,
     /// Pointers down on the map.
     pointers: u32,
+    /// Where and when each pointer went down, for clicks while gestures
+    /// don't move the map, and the clicks found that way.
+    presses: Vec<(u32, ScreenCoordinate, f64)>,
+    clicks: Vec<ScreenCoordinate>,
     /// The generation of the last update drawn.
     drawn: u64,
     /// The arguments the map last took.
@@ -187,7 +191,9 @@ impl Surface for MapSurface {
             InputEvent::Blur { .. } => engine.pointers = 0,
             _ => {}
         }
-        if let Some((input, at_ms)) = input::translate(event) {
+        if !engine.applied.options.interactive() {
+            self.input_changed = engine.press(event);
+        } else if let Some((input, at_ms)) = input::translate(event) {
             self.input_changed = engine.gestures.handle(&mut engine.map, input, at_ms) || engine.pointers > 0;
         }
     }
@@ -242,6 +248,8 @@ impl Engine {
             blit: blit::Blit::new(device.device()),
             gestures: GestureRecognizer::default(),
             pointers: 0,
+            presses: Vec::new(),
+            clicks: Vec::new(),
             drawn: 0,
             rest: inputs.camera,
             applied: inputs,
@@ -258,6 +266,7 @@ impl Engine {
             pixel_ratio: frame.scale,
             epoch: (Clock::now(), frame.now_ms),
         };
+        engine.apply_options(&engine.applied.options.clone());
         // The map rounds what it was given, so its own camera is the one at rest.
         engine.rest = engine.camera();
         Ok(engine)
@@ -284,7 +293,63 @@ impl Engine {
         if inputs.content != self.applied.content {
             self.content_changed = true;
         }
+        if inputs.options != self.applied.options {
+            self.apply_options(&inputs.options);
+        }
         self.applied = inputs.clone();
+    }
+
+    fn apply_options(&mut self, options: &Options) {
+        let [[west, south], [east, north]] = options.max_bounds.unwrap_or([[-180.0, -90.0], [180.0, 90.0]]);
+        let bounds = match (LatLng::new(south, west), LatLng::new(north, east)) {
+            (Ok(a), Ok(b)) => LatLngBounds::hull(a, b),
+            _ => LatLngBounds::world(),
+        };
+        let mut limits = BoundOptions::default().with_lat_lng_bounds(bounds);
+        limits.min_zoom = Some(options.min_zoom.unwrap_or(0.0));
+        limits.max_zoom = Some(options.max_zoom.unwrap_or(22.0));
+        limits.min_pitch = Some(options.min_pitch.unwrap_or(0.0));
+        limits.max_pitch = Some(options.max_pitch.unwrap_or(60.0));
+        if let Err(e) = self.map.set_bounds(&limits) {
+            self.error = Some(format!("maplibre: options: {}", e.message));
+        }
+        let mut gestures = GestureOptions::default();
+        if options.drag_rotate == Some(false) {
+            gestures.drag_rotate = 0.0;
+            gestures.rotate_threshold = f64::INFINITY;
+        }
+        if options.pitch_with_rotate == Some(false) || options.touch_pitch == Some(false) {
+            gestures.drag_pitch = 0.0;
+        }
+        if options.scroll_zoom == Some(false) {
+            gestures.notch_zoom = 0.0;
+            gestures.scroll_zoom_rate = 0.0;
+            gestures.pinch_zoom_rate = 0.0;
+        }
+        self.gestures.set_options(gestures);
+    }
+
+    /// Notes a press and release that stayed in place, while gestures don't
+    /// move the map and so report no clicks.
+    fn press(&mut self, event: &InputEvent) -> bool {
+        let InputEvent::Pointer { id, phase, x, y, at_ms, .. } = event else { return false };
+        let point = ScreenCoordinate::new(f64::from(*x), f64::from(*y));
+        match phase {
+            PointerPhase::Down => self.presses.push((*id, point, *at_ms)),
+            PointerPhase::Up => {
+                let tolerance = self.gestures.options().click_tolerance;
+                if let Some(index) = self.presses.iter().position(|(down, _, _)| down == id) {
+                    let (_, start, _) = self.presses.remove(index);
+                    if (start.x - point.x).hypot(start.y - point.y) <= tolerance {
+                        self.clicks.push(point);
+                        return true;
+                    }
+                }
+            }
+            PointerPhase::Cancel => self.presses.retain(|(down, _, _)| down != id),
+            PointerPhase::Move => {}
+        }
+        false
     }
 
     /// Runs `command`, posted at `at_ms` on the host's clock, where an
@@ -333,10 +398,13 @@ impl Engine {
         });
         self.map.set_frame_time(Some(self.map_time(frame.now_ms)));
         self.animating = self.gestures.frame(&mut self.map, frame.now_ms);
-        for gesture in self.gestures.take_events() {
-            if let GestureEvent::Click { position, .. } = gesture
-                && let Ok(lat_lng) = self.map.lat_lng_for_pixel(&position, WrapMode::Wrapped)
-            {
+        let mut clicks = std::mem::take(&mut self.clicks);
+        clicks.extend(self.gestures.take_events().into_iter().filter_map(|gesture| match gesture {
+            GestureEvent::Click { position, .. } => Some(position),
+            _ => None,
+        }));
+        for position in clicks {
+            if let Ok(lat_lng) = self.map.lat_lng_for_pixel(&position, WrapMode::Wrapped) {
                 self.click = Some(Click {
                     lng_lat: [lat_lng.longitude(), lat_lng.latitude()],
                     point: [position.x, position.y],
