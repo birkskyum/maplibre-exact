@@ -58,7 +58,8 @@ The crate and the example find Exact and mln-rs by path, as checkouts next to th
 ## Running the example
 
 Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches). mln-rs
-gets one, which gives a host the offscreen frame as a texture. Exact gets three, which build it with Rust
+gets two, which give a host the offscreen frame as a texture and trust Android's system certificates
+without Java. Exact gets three, which build it with Rust
 1.99.1, as mln-rs needs, let its crates take ureq 3.5, as mln-rs does, and adapt `ibex2` to ureq 3.5.
 They apply to Exact `85c1b9c5` and mln-rs `c558503`, the commits this was built on.
 

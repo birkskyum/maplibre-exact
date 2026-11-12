@@ -120,7 +120,12 @@ Found while building the prototype on exact2 `85c1b9c5`.
 1. **The offscreen texture.** `OffscreenTarget` only gave its frame back as pixels on the CPU. The
    prototype adds `OffscreenTarget::color_texture()` ([`patches/mln-rs`](patches/mln-rs)). Rendering
    straight into a texture view the host owns would also drop the blit.
-2. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
+2. **Certificates on Android without the platform verifier's Java part.** rustls-platform-verifier
+   panics on Android until the app hands it its context, and it needs a Java class in the APK, which a
+   host that loads the library from native code, as Exact does, doesn't give it. The prototype reads
+   Android's certificate directories (Conscrypt's, then the system image's) into ureq's roots there
+   ([`patches/mln-rs`](patches/mln-rs)).
+3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
 
@@ -130,15 +135,14 @@ Found while building the prototype on exact2 `85c1b9c5`.
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
   attribution. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
   wgpu's Vulkan backend, and mln-rs fetches over its ureq transport there, where Apple uses
-  NSURLSession. The Pixel was tested over USB through a local HTTP proxy (`adb reverse`), so HTTPS and
-  its certificate check on Android are still untested.
+  NSURLSession.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact
   uses one that is installed and doesn't create it, so the first time it is made with Xcode's
   automatic signing (`xcodebuild -allowProvisioningUpdates` on any app target with the bundle id).
 
 ## Not done yet
 
-- The web, Linux and Windows builds, and HTTPS on Android. The web is blocked on the wasm-bindgen pin and on mln-rs's
+- The web, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - The rest of the table above.
 - Markers drawn by the app's Contract. Exact lays a canvas's children out over it and lets the surface
