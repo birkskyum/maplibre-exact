@@ -126,16 +126,19 @@ Found while building the prototype on exact2 `85c1b9c5`.
 
 ## Where it runs
 
-- macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface. On the
-  iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with wgpu's Vulkan
-  backend, and mln-rs fetches over its ureq transport there, where Apple uses NSURLSession.
+- macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
+  style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
+  attribution. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
+  wgpu's Vulkan backend, and mln-rs fetches over its ureq transport there, where Apple uses
+  NSURLSession. The Pixel was tested over USB through a local HTTP proxy (`adb reverse`), so HTTPS and
+  its certificate check on Android are still untested.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact
   uses one that is installed and doesn't create it, so the first time it is made with Xcode's
   automatic signing (`xcodebuild -allowProvisioningUpdates` on any app target with the bundle id).
 
 ## Not done yet
 
-- The web, Linux and Windows builds, and the map itself on Android, which so far ran offline. The web is blocked on the wasm-bindgen pin and on mln-rs's
+- The web, Linux and Windows builds, and HTTPS on Android. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - The rest of the table above.
 - Markers drawn by the app's Contract. Exact lays a canvas's children out over it and lets the surface
