@@ -1,0 +1,2 @@
+test "the map is on screen"
+  expect tree has "map"

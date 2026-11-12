@@ -1,0 +1,33 @@
+[package]
+name = "maplibre-exact"
+version = "0.0.1"
+edition = "2024"
+license = "BSD-2-Clause"
+description = "MapLibre maps in Exact apps"
+publish = false
+
+[features]
+default = ["mln"]
+# The map drawn by mln-rs on Exact's GPU canvas.
+mln = [
+    "dep:mln_actor",
+    "dep:mln_gestures",
+    "dep:mln_gfx",
+    "dep:mln_map",
+    "dep:mln_renderer",
+    "dep:mln_util",
+    "dep:mln_webgpu",
+]
+
+[dependencies]
+exact-gpu = { path = "../../../exact/gpu" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+mln_actor = { package = "mln-rs-actor", path = "../../../mln-rs/crates/mln_actor", optional = true }
+mln_gestures = { package = "mln-rs-gestures", path = "../../../mln-rs/crates/mln_gestures", optional = true }
+mln_gfx = { package = "mln-rs-gfx", path = "../../../mln-rs/crates/mln_gfx", optional = true }
+mln_map = { package = "mln-rs-map", path = "../../../mln-rs/crates/mln_map", optional = true }
+mln_renderer = { package = "mln-rs-renderer", path = "../../../mln-rs/crates/mln_renderer", optional = true, features = ["font-face-shaper"] }
+mln_util = { package = "mln-rs-util", path = "../../../mln-rs/crates/mln_util", optional = true }
+mln_webgpu = { package = "mln-rs-webgpu", path = "../../../mln-rs/crates/mln_webgpu", optional = true }
