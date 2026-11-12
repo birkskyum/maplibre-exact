@@ -3,8 +3,11 @@
 // place selects it, which colours it through the content and opens a callout
 // over it, a marker the map holds at the place; tapping a cluster zooms in
 // until it splits. A long press drops a pin there. The compass turns with the
-// map and puts north back up. The buttons fly to Zürich, show the places, and
-// turn the globe and the relief on and off.
+// map and puts north back up, and the button under it shows where the person
+// is. The buttons fly to Zürich, show the places, and turn the globe and the
+// relief on and off.
+use getCurrentPosition, geolocationStatus, GeolocationPosition, GeolocationStatus from "@exact/geolocation"
+
 shape Content
   json: string
   fly: string
@@ -49,7 +52,10 @@ component HelloMap
   derive droppedLabel = match map.contextmenu { case some(c) => `Dropped pin ${formatNumber(c.lngLat.lat, "decimal")}, ${formatNumber(c.lngLat.lng, "decimal")}`, case none => "" }
   state globe = false
   state relief = false
-  resource content = mapContent(chosenId, dropped, globe, relief) as shape Content
+  resource location = geolocationStatus() as shape GeolocationStatus else empty()
+  mutation located as shape GeolocationPosition then arrived
+  derive here = match located { case some(p) => [p.coords.longitude, p.coords.latitude], case none => [] }
+  resource content = mapContent(chosenId, dropped, globe, relief, here) as shape Content
   action zurich
     postMessage(`{"command":"flyTo","center":[8.5417,47.3769],"zoom":14,"duration":2500}`, "maplibre")
   action showPlaces
@@ -60,6 +66,14 @@ component HelloMap
     globe = not globe
   action toggleRelief
     relief = not relief
+  action locate
+    send located = getCurrentPosition(maximumAge=60000)
+  action arrived
+    match located
+      case some(p)
+        postMessage(`{"command":"flyTo","center":[${p.coords.longitude},${p.coords.latitude}],"zoom":15}`, "maplibre")
+      case none
+        globe = globe
   action resetNorth
     postMessage(`{"command":"easeTo","bearing":0,"pitch":0}`, "maplibre")
   action onMap(event: string)
@@ -78,6 +92,11 @@ component HelloMap
           canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json, options=`{"minZoom":3,"maxZoom":18}`, events="click contextmenu") message=onMap position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
             button press=resetNorth aria-label="Reset bearing to north" testId="compass" position="absolute" top=10 right=10 width=36 height=36 padding=0 border-radius=18 border-width=1 border-style="solid" border-color="-exact-separator" background-color="-exact-secondary-grouped-background" display="flex" align-items="center" justify-content="center"
               image "assets/compass.png" width=24 height=24 aria-hidden=true
+            if location.available and location.state != "denied"
+              button press=locate aria-label="Show my location" testId="locate" position="absolute" top=54 right=10 width=36 height=36 padding=0 border-radius=18 border-width=1 border-style="solid" border-color="-exact-separator" background-color="-exact-secondary-grouped-background" display="flex" align-items="center" justify-content="center"
+                image "assets/locate.png" width=24 height=24 aria-hidden=true
+            if here.length == 2
+              column position="absolute" width=12 height=12 border-radius=9 background-color="#1f6feb" border-width=3 border-style="solid" border-color="#ffffff" aria-label="Your location" testId="here"
             if droppedLabel != ""
               column position="absolute" display="flex" flex-direction="column" align-items="center" gap=2 testId="dropped"
                 text droppedLabel font-size=12 padding="4px 8px" border-radius=8 background-color="-exact-secondary-grouped-background"

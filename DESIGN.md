@@ -118,7 +118,8 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Markers and popups, as GL JS's `Marker` and `Popup` | Done, as content `markers` holding the canvas's Contract children, tappable and accessible |
 | Controls, the compass, scale bar and attribution | A compass is a Contract child turned as a marker, and the record's `attribution` is text the app shows over the map; no scale bar |
 | Terrain, hillshade and the globe | Hillshade and color relief layers, and the globe as the content's `projection`; mln-rs draws no 3D terrain, so the content's `terrain` is reported as a failure, without refusing the canvas |
-| Location, offline, requests, snapshotter | Not yet |
+| Location and the location puck | The app's own, from Exact's `@exact/geolocation`, with the dot a marker; the example's locate button flies there |
+| Offline, requests, snapshotter | Not yet |
 
 ## What Exact would need to change
 

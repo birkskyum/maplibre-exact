@@ -1,6 +1,6 @@
 import type { Answer, Result, Sources } from './app.contract.d.ts';
 
-export const grants = '';
+export const grants = 'device.geolocation locationPurpose';
 
 const places = [
   { id: 'grossmuenster', name: 'Grossmünster', coordinates: [8.5440, 47.3701] },
@@ -19,8 +19,8 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
 // shaded under the roads when `relief` is on. The chosen place is global
 // state, which the pins' expression reads. The markers turn the compass with
 // the map, and hold the callout over the chosen pin, which is 32 points tall,
-// and the dropped pin.
-const content = (chosen: string, dropped: number[], globe: boolean, relief: boolean) => ({
+// the dropped pin and the dot where the person is.
+const content = (chosen: string, dropped: number[], globe: boolean, relief: boolean, here: number[]) => ({
   hitPadding: 8,
   state: { chosen },
   ...(globe ? { projection: { type: 'globe' } } : {}),
@@ -100,6 +100,7 @@ const content = (chosen: string, dropped: number[], globe: boolean, relief: bool
         .map((place) => ['callout', { lngLat: place.coordinates, anchor: 'bottom', offset: [0, -36] }]),
     ),
     ...(dropped.length === 2 ? { dropped: { lngLat: dropped, anchor: 'bottom' } } : {}),
+    ...(here.length === 2 ? { here: { lngLat: here } } : {}),
   },
 });
 
@@ -109,8 +110,8 @@ const fly = (chosen: string) => {
 };
 
 const sources: Sources = {
-  mapContent: ([chosen, dropped, globe, relief]): Result<'mapContent'> => ({
-    json: JSON.stringify(content(chosen, dropped, globe, relief)),
+  mapContent: ([chosen, dropped, globe, relief, here]): Result<'mapContent'> => ({
+    json: JSON.stringify(content(chosen, dropped, globe, relief, here)),
     fly: fly(chosen),
   }),
 };
