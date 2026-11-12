@@ -15,8 +15,9 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
 );
 
 // The map's own sources and layers, in the MapLibre Style Specification's
-// terms, the places clustered when zoomed out. The markers hold the callout
-// over the chosen pin, which is 32 points tall, and the dropped pin.
+// terms, the places clustered when zoomed out. The markers turn the compass
+// with the map, and hold the callout over the chosen pin, which is 32 points
+// tall, and the dropped pin.
 const content = (chosen: string, dropped: number[]) => ({
   hitPadding: 8,
   images: {
@@ -84,6 +85,7 @@ const content = (chosen: string, dropped: number[]) => ({
     },
   ],
   markers: {
+    compass: { rotationAlignment: 'map' },
     ...Object.fromEntries(
       places
         .filter((place) => place.id === chosen)

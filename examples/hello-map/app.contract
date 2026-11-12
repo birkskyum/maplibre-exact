@@ -2,8 +2,8 @@
 // app's own places over the base style, clustered when zoomed out. Tapping a
 // place selects it, which colours it through the content and opens a callout
 // over it, a marker the map holds at the place; tapping a cluster zooms in
-// until it splits. A long press drops a pin there. The buttons fly to Zürich
-// and show the places.
+// until it splits. A long press drops a pin there. The compass turns with the
+// map and puts north back up. The buttons fly to Zürich and show the places.
 shape Content
   json: string
   fly: string
@@ -53,6 +53,8 @@ component HelloMap
     postMessage(`{"command":"fitBounds","bounds":[[8.5402,47.3653],[8.5481,47.3779]],"padding":48,"duration":1500}`, "maplibre")
   action flyChosen
     postMessage(content.fly, "maplibre")
+  action resetNorth
+    postMessage(`{"command":"easeTo","bearing":0,"pitch":0}`, "maplibre")
   action onMap(event: string)
     if event == "click" and expand != ""
       postMessage(expand, "maplibre")
@@ -65,6 +67,8 @@ component HelloMap
             button "Zürich" press=zurich testId="zurich"
             button "Places" press=showPlaces testId="places"
           canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json, options=`{"minZoom":3,"maxZoom":18}`, events="click contextmenu") message=onMap position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+            button press=resetNorth aria-label="Reset bearing to north" testId="compass" position="absolute" top=10 right=10 width=36 height=36 padding=0 border-radius=18 border-width=1 border-style="solid" border-color="-exact-separator" background-color="-exact-secondary-grouped-background" display="flex" align-items="center" justify-content="center"
+              image "assets/compass.png" width=24 height=24 aria-hidden=true
             if droppedLabel != ""
               column position="absolute" display="flex" flex-direction="column" align-items="center" gap=2 testId="dropped"
                 text droppedLabel font-size=12 padding="4px 8px" border-radius=8 background-color="-exact-secondary-grouped-background"

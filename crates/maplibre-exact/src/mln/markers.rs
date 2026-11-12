@@ -63,10 +63,13 @@ impl Children {
     /// point. A marker whose child lies off the canvas or behind the globe is
     /// hidden, so it is neither hit nor read out.
     pub(super) fn place(&mut self, map: &Map, markers: &[Marker], size: [f32; 2], scale: f32) {
+        let camera = map.get_camera_options(None);
+        let view =
+            View { bearing: camera.bearing.unwrap_or_default(), pitch: camera.pitch.unwrap_or_default(), size, scale };
         for (index, child) in self.children.iter_mut().enumerate() {
             let Some(child) = child else { continue };
             let marker = markers.iter().find(|marker| marker.id == child.name);
-            child.placement = marker.map(|marker| place(map, marker, child.frame, size, scale, index));
+            child.placement = marker.and_then(|marker| place(map, &view, marker, child.frame, index));
         }
     }
 
@@ -97,22 +100,17 @@ impl Children {
             return;
         }
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(device));
-        let mut vertices = Vec::with_capacity(drawn.len() * 6 * 4);
+        let mut vertices = Vec::with_capacity(drawn.len() * 6 * 6);
         for &index in &drawn {
             let child = self.children[index].as_mut().expect("drawn children exist");
-            let placement = child.placement.expect("drawn children are placed");
-            let [x0, y0] = [placement.homography[2], placement.homography[5]];
-            let [x1, y1] = [x0 + child.frame[2], y0 + child.frame[3]];
-            let clip = |x: f32, y: f32| [x / size[0] * 2.0 - 1.0, 1.0 - y / size[1] * 2.0];
-            let corners = [
-                (clip(x0, y0), [0.0, 0.0]),
-                (clip(x1, y0), [1.0, 0.0]),
-                (clip(x0, y1), [0.0, 1.0]),
-                (clip(x1, y1), [1.0, 1.0]),
-            ];
-            for corner in [0, 1, 2, 2, 1, 3] {
-                let ([x, y], [u, v]) = corners[corner];
-                vertices.extend_from_slice(&[x, y, u, v]);
+            let h = child.placement.expect("drawn children are placed").homography;
+            let [width, height] = [child.frame[2], child.frame[3]];
+            for [u, v] in [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]] {
+                let [x, y] = [u * width, v * height];
+                let [cx, cy, w] = [0, 3, 6].map(|row| h[row] * x + h[row + 1] * y + h[row + 2]);
+                // In clip space before the divide, which interpolates the
+                // pixels as the homography maps them.
+                vertices.extend_from_slice(&[cx / size[0] * 2.0 - w, w - cy / size[1] * 2.0, 0.0, w, u, v]);
             }
             if child.group.is_none() {
                 let view = child.texture.as_ref().expect("drawn children have pixels");
@@ -163,27 +161,66 @@ impl Children {
     }
 }
 
+/// The camera and canvas markers are placed for.
+struct View {
+    bearing: f64,
+    pitch: f64,
+    /// The canvas in points.
+    size: [f32; 2],
+    /// Pixels a point.
+    scale: f32,
+}
+
 /// Where `marker` puts a child laid out at `frame`, the `index`th of the
-/// canvas's: its anchor at the marker's point plus the offset, on whole
-/// pixels so that its pixels stay sharp.
-fn place(map: &Map, marker: &Marker, frame: [f32; 4], size: [f32; 2], scale: f32, index: usize) -> Placement {
+/// canvas's, as GL JS's `Marker` places its element: the anchor at the
+/// marker's point plus the offset, or where the layout put it, turned by the
+/// rotation, less the bearing when it turns with the map, and squashed as the
+/// map pitches when it lies on the map. An upright child sits on whole pixels,
+/// so that its pixels stay sharp. `None` leaves the child to the layout.
+fn place(map: &Map, view: &View, marker: &Marker, frame: [f32; 4], index: usize) -> Option<Placement> {
     let [width, height] = [f64::from(frame[2]), f64::from(frame[3])];
     let [ax, ay] = marker.anchor.fraction();
-    let at = LatLng::new(marker.lng_lat[1], marker.lng_lat[0]).ok();
-    let point = at.filter(|at| !map.is_location_occluded(at)).map(|at| map.pixel_for_lat_lng(&at));
-    let snap = |n: f64| ((n * f64::from(scale)).round() / f64::from(scale)) as f32;
-    let (x, y, hidden) = match point {
-        Some(point) if point.x.is_finite() && point.y.is_finite() => {
-            let x = snap(point.x - ax * width + marker.offset[0]);
-            let y = snap(point.y - ay * height + marker.offset[1]);
-            let outside = x + frame[2] < 0.0 || y + frame[3] < 0.0 || x > size[0] || y > size[1];
-            (x, y, outside)
-        }
-        _ => (0.0, 0.0, true),
+    let [ax, ay] = [ax * width, ay * height];
+    let angle = (marker.rotation - if marker.turns_with_map() { view.bearing } else { 0.0 }).to_radians();
+    let squash = if marker.lies_on_map() { view.pitch.to_radians().cos() } else { 1.0 };
+    let upright = angle.rem_euclid(std::f64::consts::TAU) == 0.0 && squash == 1.0;
+    let point = match marker.lng_lat {
+        Some([lng, lat]) => LatLng::new(lat, lng)
+            .ok()
+            .filter(|at| !map.is_location_occluded(at))
+            .map(|at| map.pixel_for_lat_lng(&at))
+            .filter(|point| point.x.is_finite() && point.y.is_finite())
+            .map(|point| [point.x, point.y]),
+        None if upright && marker.offset == [0.0, 0.0] => return None,
+        None => Some([f64::from(frame[0]) + ax, f64::from(frame[1]) + ay]),
     };
+    let Some([x, y]) = point.map(|[x, y]| [x + marker.offset[0], y + marker.offset[1]]) else {
+        return Some(Placement { hidden: true, ..at(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, index) });
+    };
+    // The child turned about its anchor, squashed, then moved to the point.
+    let (sin, cos) = angle.sin_cos();
+    let [a, b, c, d] = [cos, -sin, squash * sin, squash * cos];
+    let [mut tx, mut ty] = [x - (a * ax + b * ay), y - (c * ax + d * ay)];
+    if upright {
+        let snap = |n: f64| (n * f64::from(view.scale)).round() / f64::from(view.scale);
+        [tx, ty] = [snap(tx), snap(ty)];
+    }
+    let mut placement = at(a, b, c, d, tx, ty, index);
+    let corners = [[0.0, 0.0], [width, 0.0], [0.0, height], [width, height]]
+        .map(|[u, v]| [a * u + b * v + tx, c * u + d * v + ty]);
+    let [x0, y0, x1, y1] = corners.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |[x0, y0, x1, y1], [x, y]| {
+        [x0.min(*x), y0.min(*y), x1.max(*x), y1.max(*y)]
+    });
+    placement.hidden = x1 < 0.0 || y1 < 0.0 || x0 > f64::from(view.size[0]) || y0 > f64::from(view.size[1]);
+    Some(placement)
+}
+
+/// The placement of the affine map `[a b tx; c d ty]` for the `index`th child,
+/// later children nearer.
+fn at(a: f64, b: f64, c: f64, d: f64, tx: f64, ty: f64, index: usize) -> Placement {
     Placement {
-        hidden,
-        homography: [1.0, 0.0, x, 0.0, 1.0, y, 0.0, 0.0, 1.0],
+        hidden: false,
+        homography: [a, b, tx, c, d, ty, 0.0, 0.0, 1.0].map(|n| n as f32),
         depth: index as f32 + 1.0,
         clip_depth: [[0.0, 0.0, 1.0]; 2],
     }
@@ -252,9 +289,9 @@ impl Gpu {
                         module: &self.module,
                         entry_point: Some("vs"),
                         buffers: &[Some(wgpu::VertexBufferLayout {
-                            array_stride: 16,
+                            array_stride: 24,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+                            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2],
                         })],
                         compilation_options: Default::default(),
                     },

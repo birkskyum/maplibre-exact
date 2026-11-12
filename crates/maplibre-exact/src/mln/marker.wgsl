@@ -1,5 +1,5 @@
-// A child of the canvas drawn where its marker puts it. Its pixels are
-// premultiplied, as the host paints them.
+// A child of the canvas drawn where its marker puts it, its corners already
+// in clip space. Its pixels are premultiplied, as the host paints them.
 
 @group(0) @binding(0) var picture: texture_2d<f32>;
 @group(0) @binding(1) var picture_sampler: sampler;
@@ -10,9 +10,9 @@ struct Varyings {
 }
 
 @vertex
-fn vs(@location(0) position: vec2f, @location(1) uv: vec2f) -> Varyings {
+fn vs(@location(0) position: vec4f, @location(1) uv: vec2f) -> Varyings {
     var out: Varyings;
-    out.position = vec4f(position, 0.0, 1.0);
+    out.position = position;
     out.uv = uv;
     return out;
 }

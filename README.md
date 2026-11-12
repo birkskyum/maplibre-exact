@@ -24,7 +24,8 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
 - `markers` in the content holds the canvas's children at places on the map, by their `testId`, as GL
   JS's `Marker` holds an element (`{"callout": {"lngLat": [8.54, 47.38], "anchor": "bottom"}}`). A
   marker is the app's own Contract, so it keeps its taps and its accessibility, and Exact reports it
-  where the map put it.
+  where the map put it. Markers turn and tilt with the map as GL JS's do, and one without a place
+  is a compass.
 - `options` limits the camera and turns gestures off, with GL JS's `MapOptions` names (`minZoom`,
   `maxZoom`, `minPitch`, `maxPitch`, `maxBounds`, `interactive`, `dragRotate`, `pitchWithRotate`,
   `touchPitch`, `scrollZoom`).

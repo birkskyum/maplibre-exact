@@ -50,8 +50,13 @@ the app's state, typed in TypeScript.
   one, and its release is no click. A cluster's feature carries `clusterExpansionZoom`, the zoom
   GL JS's `getClusterExpansionZoom` answers, so the app can zoom in to split it with one command.
 - `markers` holds children of the canvas at places on the map, by their `testId`, with GL JS's
-  `Marker` options `lngLat`, `anchor` and `offset`. The rest of the canvas's children stay where the
-  layout puts them, as controls over the map do.
+  `Marker` options `lngLat`, `anchor`, `offset`, `rotation`, `rotationAlignment` and
+  `pitchAlignment`. The rest of the canvas's children stay where the layout puts them, as controls
+  over the map do.
+
+Events reach Contract as plain names because Contract has no JSON reader, and the details go in the
+record, which the app reads as a shape of its own. The record's camera is the one at rest, so the
+record changes when something happens and not on every frame of a gesture.
 
 ## Markers
 
@@ -63,15 +68,17 @@ that frame, and Exact hit-tests the child and reports it to accessibility and to
 a marker is tapped, read out and driven like any other node. A marker whose place is off the canvas
 or behind the globe is hidden, which takes it out of hit-testing and accessibility too.
 
+A placement is a homography, so a marker turns and tilts as GL JS's does: `rotationAlignment: "map"`
+turns it with the bearing and `pitchAlignment: "map"` lays it on the map as it pitches, both about
+its anchor. A marker without `lngLat` stays where the layout put it and only turns, which is a
+compass: the example's turns its needle with the map, flattens it with the pitch as GL JS's
+`visualizePitch` does, and puts north back up when tapped.
+
 Who draws the marker's pixels depends on the host. On Apple the host paints each child into a
 texture and the map draws the placed ones over its frame, in the same pass, so a marker never lags
 the map. On Android (and Linux and the web) the host draws the child itself at the placement. The
 canvas asks for children one by one only while the content has markers, since capturing each costs
 the host more than its ordinary overlay.
-
-Events reach Contract as plain names because Contract has no JSON reader, and the details go in the
-record, which the app reads as a shape of its own. The record's camera is the one at rest, so the
-record changes when something happens and not on every frame of a gesture.
 
 ## How the mln backend draws
 
@@ -104,7 +111,7 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Feature queries and feature state | Not yet |
 | Images and icons | Done, as content `images` from the app's `assets/`, which Exact delivers to the surface |
 | Markers and popups, as GL JS's `Marker` and `Popup` | Done, as content `markers` holding the canvas's Contract children, tappable and accessible |
-| Controls, the compass, scale bar and attribution | The record's `attribution`, which the app shows over the map; no compass or scale bar |
+| Controls, the compass, scale bar and attribution | A compass is a Contract child turned as a marker, and the record's `attribution` is text the app shows over the map; no scale bar |
 | Terrain and hillshade | Up to the style; untested on mln-rs |
 | Location, offline, requests, snapshotter | Not yet |
 
@@ -170,8 +177,6 @@ Found while building the prototype on exact2 `85c1b9c5`.
 - The web, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - The rest of the table above.
-- Markers that turn and tilt with the map (GL JS's `rotationAlignment` and `pitchAlignment`). A
-  placement is a homography, so it can carry both.
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen share the thread's `RunLoop`, which mln-rs allows, but the record's
   name, `maplibre`, belongs to the first map.

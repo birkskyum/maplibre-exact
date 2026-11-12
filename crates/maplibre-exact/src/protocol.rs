@@ -126,11 +126,13 @@ pub struct Content {
 }
 
 /// A child of the map's canvas held at a place on the map, as GL JS's
-/// `Marker` holds an element: `"markers": {"<testId>": {"lngLat": [lng, lat],
-/// "anchor": "bottom", "offset": [x, y]}}`. The child is the app's own
-/// Contract, laid out at its own size (`position="absolute"`), so it keeps
-/// its taps and its accessibility. A child the markers don't name stays where
-/// the layout puts it, as controls over the map do.
+/// `Marker` holds an element, with its options: `"markers": {"<testId>":
+/// {"lngLat": [lng, lat], "anchor": "bottom", "offset": [x, y]}}`. The child
+/// is the app's own Contract, laid out at its own size
+/// (`position="absolute"`), so it keeps its taps and its accessibility. A
+/// marker without `lngLat` stays where the layout puts it and only turns,
+/// which makes a compass: `{"rotationAlignment": "map"}`. A child the markers
+/// don't name stays where the layout puts it, as controls over the map do.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Marker {
@@ -138,13 +140,51 @@ pub struct Marker {
     #[serde(skip)]
     pub id: String,
     /// `[longitude, latitude]` in degrees.
-    pub lng_lat: [f64; 2],
-    /// The part of the child at the place, `center` by default.
+    pub lng_lat: Option<[f64; 2]>,
+    /// The part of the child at the place, `center` by default, which it
+    /// turns about.
     #[serde(default)]
     pub anchor: Anchor,
     /// Points the child moves from there, `[right, down]`.
     #[serde(default)]
     pub offset: [f64; 2],
+    /// Degrees clockwise.
+    #[serde(default)]
+    pub rotation: f64,
+    /// `map` turns the child with the map's bearing.
+    #[serde(default)]
+    pub rotation_alignment: Alignment,
+    /// `map` lays the child on the map as it pitches; `auto` follows
+    /// `rotationAlignment`.
+    #[serde(default)]
+    pub pitch_alignment: Alignment,
+}
+
+impl Marker {
+    /// Whether the child turns with the map's bearing.
+    #[must_use]
+    pub fn turns_with_map(&self) -> bool {
+        self.rotation_alignment == Alignment::Map
+    }
+
+    /// Whether the child lies on the map as it pitches.
+    #[must_use]
+    pub fn lies_on_map(&self) -> bool {
+        match self.pitch_alignment {
+            Alignment::Auto => self.turns_with_map(),
+            alignment => alignment == Alignment::Map,
+        }
+    }
+}
+
+/// Whom a marker turns or tilts with, with GL JS's names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Alignment {
+    #[default]
+    Auto,
+    Map,
+    Viewport,
 }
 
 /// The part of a marker at its place, with GL JS's names.
@@ -301,7 +341,8 @@ impl Content {
                 for (id, marker) in markers {
                     let mut marker: Marker =
                         serde_json::from_value(marker).map_err(|e| format!("maplibre: content marker {id}: {e}"))?;
-                    if !marker.lng_lat.iter().chain(&marker.offset).all(|n| n.is_finite()) {
+                    let numbers = marker.lng_lat.iter().flatten().chain(&marker.offset).chain([&marker.rotation]);
+                    if !numbers.into_iter().all(|n| n.is_finite()) {
                         return Err(format!("maplibre: content marker {id} must have finite numbers"));
                     }
                     marker.id = id;
@@ -726,19 +767,35 @@ mod tests {
     #[test]
     fn content_markers_are_by_test_id_with_gl_js_anchors() {
         let mut markers = inputs(
-            r#"{"markers":{"hb":{"lngLat":[8.54,47.38],"anchor":"bottom-left","offset":[0,-4]},"eth":{"lngLat":[8.55,47.38]}}}"#,
+            r#"{"markers":{"hb":{"lngLat":[8.54,47.38],"anchor":"bottom-left","offset":[0,-4]},"compass":{"rotationAlignment":"map"}}}"#,
         )
         .unwrap()
         .content
         .markers;
         markers.sort_by(|a, b| a.id.cmp(&b.id));
+        let marker = |id: &str| Marker {
+            id: id.into(),
+            lng_lat: None,
+            anchor: Anchor::Center,
+            offset: [0.0, 0.0],
+            rotation: 0.0,
+            rotation_alignment: Alignment::Auto,
+            pitch_alignment: Alignment::Auto,
+        };
         assert_eq!(
             markers,
             vec![
-                Marker { id: "eth".into(), lng_lat: [8.55, 47.38], anchor: Anchor::Center, offset: [0.0, 0.0] },
-                Marker { id: "hb".into(), lng_lat: [8.54, 47.38], anchor: Anchor::BottomLeft, offset: [0.0, -4.0] },
+                Marker { rotation_alignment: Alignment::Map, ..marker("compass") },
+                Marker {
+                    lng_lat: Some([8.54, 47.38]),
+                    anchor: Anchor::BottomLeft,
+                    offset: [0.0, -4.0],
+                    ..marker("hb")
+                },
             ]
         );
+        assert!(markers[0].turns_with_map() && markers[0].lies_on_map());
+        assert!(!markers[1].turns_with_map() && !markers[1].lies_on_map());
         assert_eq!(Anchor::BottomLeft.fraction(), [0.0, 1.0]);
         assert!(inputs(r#"{"markers":{"hb":{"lngLat":[8.54,47.38],"anchor":"middle"}}}"#).is_err());
         assert!(inputs(r#"{"markers":{"hb":{"center":[8.54,47.38]}}}"#).is_err());
