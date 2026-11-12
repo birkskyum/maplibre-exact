@@ -92,7 +92,10 @@ impl Inputs {
 /// `{"sources": {"id": source, …}, "layers": [layer, …]}` in the style
 /// specification's terms. A layer draws above the layers before it and above
 /// the base style, unless it names a layer to draw under with `beforeId`, as
-/// GL JS's `addLayer` takes it. A layer may use a source of the base style.
+/// GL JS's `addLayer` takes it, or a type of layer with `beforeType`, which
+/// draws it under the base style's first layer of that type, so `"symbol"`
+/// draws it under the labels whatever the style names them. A layer may use a
+/// source of the base style.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Content {
     /// Sources by id.
@@ -110,7 +113,10 @@ pub struct Layer {
     pub id: String,
     /// The layer it draws under, if not above all before it.
     pub before: Option<String>,
-    /// The layer as the style specification writes it, without `beforeId`.
+    /// The type of the base style's layer it draws under, without `before`.
+    pub before_type: Option<String>,
+    /// The layer as the style specification writes it, without `beforeId`
+    /// and `beforeType`.
     pub json: Json,
 }
 
@@ -160,7 +166,12 @@ impl Content {
                         Some(Json::String(before)) => Some(before),
                         Some(_) => return Err(format!("maplibre: layer {id}'s beforeId must be a layer id")),
                     };
-                    content.layers.push(Layer { id, before, json: Json::Object(layer) });
+                    let before_type = match layer.remove("beforeType") {
+                        None | Some(Json::Null) => None,
+                        Some(Json::String(kind)) => Some(kind),
+                        Some(_) => return Err(format!("maplibre: layer {id}'s beforeType must be a layer type")),
+                    };
+                    content.layers.push(Layer { id, before, before_type, json: Json::Object(layer) });
                 }
             }
             Some(_) => return Err("maplibre: content's layers must be an array".into()),
@@ -219,6 +230,9 @@ pub enum Command {
     JumpTo(CameraChange),
     EaseTo(Animation),
     FlyTo(Animation),
+    /// Shows the box between two `[longitude, latitude]` corners, `padding`
+    /// points in from the canvas's edges, animated unless `duration` is 0.
+    FitBounds { bounds: [[f64; 2]; 2], padding: Option<f64>, duration: Option<f64> },
     SetStyle { style: String },
 }
 
@@ -356,6 +370,14 @@ mod tests {
                 camera: CameraChange { center: Some([8.54, 47.37]), zoom: Some(12.0), ..CameraChange::default() },
                 duration: Some(2000.0),
             }))
+        );
+    }
+
+    #[test]
+    fn a_fit_bounds_takes_two_corners() {
+        assert_eq!(
+            Command::parse(r#"{"command":"fitBounds","bounds":[[8.5,47.3],[8.6,47.4]],"padding":20}"#),
+            Ok(Command::FitBounds { bounds: [[8.5, 47.3], [8.6, 47.4]], padding: Some(20.0), duration: None })
         );
     }
 

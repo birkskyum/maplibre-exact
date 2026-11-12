@@ -10,10 +10,15 @@ const places = [
   { id: 'opera', name: 'Opernhaus', coordinates: [8.5466, 47.3653] },
 ];
 
+const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
+  (id) => places.find((place) => place.id === id)!.coordinates,
+);
+
 // The map's own sources and layers, in the MapLibre Style Specification's terms.
 const content = (chosen: string) => ({
   hitPadding: 8,
   sources: {
+    walk: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: walk } } },
     places: {
       type: 'geojson',
       data: {
@@ -27,6 +32,14 @@ const content = (chosen: string) => ({
     },
   },
   layers: [
+    {
+      id: 'walk',
+      type: 'line',
+      source: 'walk',
+      beforeType: 'symbol',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#1f6feb', 'line-width': 5, 'line-opacity': 0.5 },
+    },
     {
       id: 'places',
       type: 'circle',

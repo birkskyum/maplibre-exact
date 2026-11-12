@@ -90,11 +90,12 @@ pub(super) fn apply(style: &mut Style, applied: &Content, desired: &Content) -> 
         let next = desired.layers[index + 1..]
             .iter()
             .find(|above| held.layers.iter().any(|held| held.id == above.id) || added.contains(&above.id))
-            .map(|above| above.id.as_str());
-        let before = layer.before.as_deref().or(next);
+            .map(|above| above.id.clone());
+        let under_type = layer.before_type.as_deref().and_then(|kind| first_of_type(style, desired, kind));
+        let before = layer.before.clone().or(under_type).or(next);
         let mut error = ConversionError::default();
         match convert_layer(&Convertible::from(&layer.json), &mut error) {
-            Some(converted) => match style.add_layer(converted, before) {
+            Some(converted) => match style.add_layer(converted, before.as_deref()) {
                 Ok(()) => added.push(layer.id.clone()),
                 Err(e) => errors.push(format!("maplibre: layer {}: {}", layer.id, e.message)),
             },
@@ -109,6 +110,15 @@ pub(super) fn apply(style: &mut Style, applied: &Content, desired: &Content) -> 
         .collect();
     held.hit_padding = desired.hit_padding;
     (held, errors)
+}
+
+/// The base style's first layer of type `kind`, which none of the content is.
+fn first_of_type(style: &Style, content: &Content, kind: &str) -> Option<String> {
+    style
+        .get_layers()
+        .iter()
+        .find(|layer| layer.get_type_info().type_ == kind && !content.layers.iter().any(|c| c.id == layer.get_id()))
+        .map(|layer| layer.get_id())
 }
 
 /// The ids of `layers` that `other` has too, in `layers`' order.
@@ -171,7 +181,7 @@ fn in_place(old: &Layer, new: &Layer) -> bool {
         }
         json
     };
-    old.before == new.before && rest(old) == rest(new)
+    old.before == new.before && old.before_type == new.before_type && rest(old) == rest(new)
 }
 
 /// Sets what changed in `new`'s paint and layout properties, filter and zoom
@@ -253,6 +263,21 @@ mod tests {
         assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
         assert!(style.get_source("points").is_some());
         assert_eq!(held.layers.len(), 2);
+    }
+
+    #[test]
+    fn a_layer_can_draw_under_the_first_base_layer_of_a_type() {
+        let mut style = Style::new(1.0);
+        style.load_json(
+            r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+                "layers":[{"id":"water","type":"background"},
+                          {"id":"road-names","type":"symbol","source":"points"},
+                          {"id":"city-names","type":"symbol","source":"points"}]}"#,
+        );
+        let under_labels = r#"{"layers":[{"id":"trail","type":"line","source":"points","beforeType":"symbol"}]}"#;
+        let (_, errors) = apply(&mut style, &Content::default(), &content(under_labels));
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(layers(&style), ["water", "trail", "road-names", "city-names"]);
     }
 
     #[test]

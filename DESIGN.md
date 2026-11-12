@@ -32,8 +32,9 @@ declaration as the app's state changes. In MapLibre Compose the declaration is a
 Exact it is the `content` argument, the style specification's JSON, which the data module builds from
 the app's state, typed in TypeScript.
 
-- A layer draws above the base style and above the content's layers before it, or under the layer its
-  `beforeId` names.
+- A layer draws above the base style and above the content's layers before it, under the layer its
+  `beforeId` names, or under the base style's first layer of the type its `beforeType` names, so
+  `"beforeType": "symbol"` draws it under the labels whatever the style calls them.
 - When the content changes, the map does the least it can. A GeoJSON source takes new data in place,
   and a layer takes changed paint and layout properties, filter and zoom range in place. A changed
   source type or tiles, a changed layer type or source, or a new order removes and adds those layers
@@ -70,9 +71,9 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Compose guide | Here |
 |---|---|
 | Composition, a base style plus declared sources and layers, diffed | Done, as `content` |
-| Layers, with GeoJSON and tiled sources, expressions and `beforeId` | Done; `Anchor.Below` by layer type (under the labels, whatever the style names them) isn't |
+| Layers, with GeoJSON and tiled sources, expressions and `beforeId` | Done, and `beforeType` draws under the base style's first layer of a type, as `Anchor.Below` does |
 | Interaction, with clicks on the map and its layers and hit padding | Done; long press, which gestures do what, and camera limits aren't |
-| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo` and the record; bounds, padding and fitting a box aren't |
+| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record; camera limits and padding aren't |
 | Styling, switching styles at run time and keeping content | Done, with the `setStyle` command or a new `style` |
 | Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
 | Feature queries and feature state | Not yet |

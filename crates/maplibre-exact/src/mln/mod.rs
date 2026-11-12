@@ -24,7 +24,7 @@ use mln_map::{AnimationOptions, CameraOptions, Map, MapEvent, MapOptions, Update
 use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
 use serde_json::Value as Json;
 
@@ -298,6 +298,21 @@ impl Engine {
             }
             Command::FlyTo(animation) => {
                 self.map.fly_to(&camera_options(&animation.camera), &animation_options(animation.duration));
+            }
+            Command::FitBounds { bounds: [[west, south], [east, north]], padding, duration } => {
+                let padding = padding.unwrap_or_default();
+                let corners = (LatLng::new(south, west), LatLng::new(north, east));
+                let camera = match (corners, EdgeInsets::new(padding, padding, padding, padding)) {
+                    ((Ok(a), Ok(b)), Ok(insets)) => {
+                        self.map.camera_for_lat_lng_bounds(&LatLngBounds::hull(a, b), &insets, None, None)
+                    }
+                    _ => Err(mln_util::Error::invalid_argument("bounds or padding out of range")),
+                };
+                match camera {
+                    Ok(camera) if duration == Some(0.0) => self.map.jump_to(&camera),
+                    Ok(camera) => self.map.ease_to(&camera, &animation_options(duration)),
+                    Err(e) => self.error = Some(format!("maplibre: fitBounds: {}", e.message)),
+                }
             }
             Command::SetStyle { style } => {
                 self.applied.style = style;
