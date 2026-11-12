@@ -317,3 +317,78 @@ impl Gpu {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_map::{CameraOptions, MapOptions};
+    use mln_util::size::Size;
+
+    use super::*;
+    use crate::protocol::{Alignment, Anchor};
+
+    /// A 400×300 map looking straight down at 0, 0 at zoom 2, turned and
+    /// pitched as given.
+    fn map(bearing: f64, pitch: f64) -> (Map, View) {
+        let mut map = Map::new(MapOptions::new().with_size(Size::new(400, 300)).with_pixel_ratio(1.0)).unwrap();
+        map.jump_to(
+            &CameraOptions::default()
+                .with_center(LatLng::new(0.0, 0.0).ok())
+                .with_zoom(Some(2.0))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+        );
+        (map, View { bearing, pitch, size: [400.0, 300.0], scale: 2.0 })
+    }
+
+    fn marker(lng_lat: Option<[f64; 2]>) -> Marker {
+        Marker {
+            id: "m".into(),
+            lng_lat,
+            anchor: Anchor::Center,
+            offset: [0.0, 0.0],
+            rotation: 0.0,
+            rotation_alignment: Alignment::Auto,
+            pitch_alignment: Alignment::Auto,
+        }
+    }
+
+    fn near(a: [f32; 9], b: [f32; 9]) -> bool {
+        a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-3)
+    }
+
+    #[test]
+    fn a_marker_puts_its_anchor_at_its_place_plus_the_offset() {
+        let (map, view) = map(0.0, 0.0);
+        let callout = Marker { anchor: Anchor::Bottom, offset: [0.0, -4.0], ..marker(Some([0.0, 0.0])) };
+        let placement = place(&map, &view, &callout, [0.0, 0.0, 80.0, 40.0], 0).unwrap();
+        assert!(!placement.hidden);
+        assert!(near(placement.homography, [1.0, 0.0, 160.0, 0.0, 1.0, 106.0, 0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn a_marker_off_the_canvas_is_hidden() {
+        let (map, view) = map(0.0, 0.0);
+        let placement = place(&map, &view, &marker(Some([120.0, 0.0])), [0.0, 0.0, 80.0, 40.0], 0).unwrap();
+        assert!(placement.hidden);
+    }
+
+    #[test]
+    fn an_upright_marker_without_a_place_is_left_to_the_layout() {
+        let (map, view) = map(0.0, 0.0);
+        let compass = Marker { rotation_alignment: Alignment::Map, ..marker(None) };
+        assert_eq!(place(&map, &view, &compass, [354.0, 10.0, 36.0, 36.0], 0), None);
+    }
+
+    #[test]
+    fn a_compass_turns_against_the_bearing_about_its_center_and_lies_on_the_map() {
+        let (map, view) = map(90.0, 60.0);
+        let compass = Marker { rotation_alignment: Alignment::Map, ..marker(None) };
+        let placement = place(&map, &view, &compass, [354.0, 10.0, 36.0, 36.0], 0).unwrap();
+        // Turned a quarter counterclockwise and squashed to half its height
+        // (cos 60°), its center where the layout put it.
+        let h = placement.homography;
+        assert!(near(h, [0.0, 1.0, h[2], -0.5, 0.0, h[5], 0.0, 0.0, 1.0]), "{h:?}");
+        let center = [h[0] * 18.0 + h[1] * 18.0 + h[2], h[3] * 18.0 + h[4] * 18.0 + h[5]];
+        assert!((center[0] - 372.0).abs() < 1e-3 && (center[1] - 28.0).abs() < 1e-3, "{center:?}");
+    }
+}
