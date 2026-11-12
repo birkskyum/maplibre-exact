@@ -2,8 +2,8 @@
 //!
 //! Exact calls a surface on one thread, so the surface keeps its mln-rs map
 //! there and runs that thread's mln-rs `RunLoop` once a frame. mln-rs renders
-//! on Exact's device into a texture of its own and submits that frame itself;
-//! the surface then draws the texture into Exact's target with the encoder it
+//! on Exact's device into a texture of its own and submits that frame itself,
+//! and the surface then draws the texture into Exact's target with the encoder it
 //! is given, which Exact submits after. The surface asks for frames while the
 //! map loads, animates or follows a gesture, and for none once it is idle.
 //!
@@ -11,6 +11,7 @@
 //! `clock` as the rest of an Exact app does. Tiles load in real time.
 
 mod blit;
+mod content;
 mod input;
 
 use std::rc::Rc;
@@ -21,11 +22,13 @@ use mln_gestures::{GestureEvent, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{AnimationOptions, CameraOptions, Map, MapEvent, MapOptions, UpdateReader};
 use mln_renderer::Renderer;
+use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
-use mln_util::geo::{LatLng, WrapMode};
+use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
+use serde_json::Value as Json;
 
-use crate::protocol::{self, Camera, CameraChange, Command, Event, Inputs, Record};
+use crate::protocol::{self, Camera, CameraChange, Click, Command, Content, Event, Inputs, Record};
 
 /// The factory a GPU module's registry names.
 #[must_use]
@@ -34,8 +37,8 @@ pub fn surface() -> Box<dyn Surface> {
 }
 
 thread_local! {
-    /// The thread's loop, which every map on it shares: mln-rs schedules a
-    /// map's work on the loop current when the map was made.
+    /// The thread's loop, which every map on it shares, since mln-rs schedules
+    /// a map's work on the loop current when the map was made.
     static RUN_LOOP: RunLoop = RunLoop::new();
 }
 
@@ -59,7 +62,7 @@ pub struct MapSurface {
 /// The map and what draws it, made at the first frame, on the device that
 /// frame brings.
 struct Engine {
-    // Dropped in this order: the renderer before its map and backend.
+    // Dropped in this order, the renderer before its map and backend.
     renderer: Renderer,
     target: mln_webgpu::OffscreenTarget,
     map: Map,
@@ -71,28 +74,24 @@ struct Engine {
     pointers: u32,
     /// The generation of the last update drawn.
     drawn: u64,
-    /// The style and camera arguments the map last took.
+    /// The arguments the map last took.
     applied: Inputs,
+    /// Whether the style has loaded, which content needs.
+    style_loaded: bool,
+    /// The content on the style, and whether `applied.content` differs.
+    held: Content,
+    content_changed: bool,
     /// The camera last reported at rest.
     rest: Camera,
     idle: bool,
     loaded: bool,
     animating: bool,
+    click: Option<Click>,
+    error: Option<String>,
     size: Size,
     pixel_ratio: f32,
     /// The map's clock at a host millisecond.
     epoch: (TimePoint, f64),
-}
-
-impl MapSurface {
-    fn event(&mut self, event: &Event) {
-        self.events.push(event.to_json());
-    }
-
-    fn fail(&mut self, message: String) {
-        self.event(&Event::Error { message: message.clone() });
-        self.error = Some(SurfaceError(message));
-    }
 }
 
 impl Surface for MapSurface {
@@ -119,7 +118,8 @@ impl Surface for MapSurface {
             match Engine::new(frame, device, queue, inputs.clone()) {
                 Ok(engine) => self.engine = Some(engine),
                 Err(message) => {
-                    self.fail(message);
+                    self.events.push(Event::Error.name().to_owned());
+                    self.error = Some(SurfaceError(message));
                     return false;
                 }
             }
@@ -134,13 +134,11 @@ impl Surface for MapSurface {
         if let Some(texture) = engine.target.color_texture() {
             engine.blit.draw(device, encoder, target, format, &texture);
         }
-        self.record = Some(engine.record());
-        for event in &events {
-            if let Event::Error { message } = event {
-                self.error = Some(SurfaceError(message.clone()));
-            }
-            self.event(event);
+        if events.contains(&Event::Error) {
+            self.error = engine.error.clone().map(SurfaceError);
         }
+        self.record = Some(engine.record());
+        self.events.extend(events.iter().map(|event| event.name().to_owned()));
         wants_frame
     }
 
@@ -168,7 +166,13 @@ impl Surface for MapSurface {
                     Some(engine) => engine.command(command),
                     None => self.pending.push(command),
                 },
-                Err(message) => self.event(&Event::Error { message }),
+                Err(message) => {
+                    if let Some(engine) = self.engine.as_mut() {
+                        engine.error = Some(message.clone());
+                    }
+                    self.events.push(Event::Error.name().to_owned());
+                    self.error = Some(SurfaceError(message));
+                }
             }
             self.input_changed = true;
             return;
@@ -196,16 +200,16 @@ impl Surface for MapSurface {
     }
 
     fn published(&mut self) -> Option<String> {
-        let record = self.record?;
-        if self.published == Some(record) {
+        let record = self.record.as_ref()?;
+        if self.published.as_ref() == Some(record) {
             return None;
         }
-        self.published = Some(record);
+        self.published = Some(record.clone());
         Some(record.to_json())
     }
 
     fn agent(&mut self, _request: &str) -> Option<String> {
-        self.record.map(|record| record.to_json())
+        self.record.as_ref().map(Record::to_json)
     }
 
     fn take_error(&mut self) -> Option<SurfaceError> {
@@ -240,9 +244,14 @@ impl Engine {
             drawn: 0,
             rest: inputs.camera,
             applied: inputs,
+            style_loaded: false,
+            held: Content::default(),
+            content_changed: true,
             idle: false,
             loaded: false,
             animating: false,
+            click: None,
+            error: None,
             size,
             pixel_ratio: frame.scale,
             epoch: (Clock::now(), frame.now_ms),
@@ -258,6 +267,7 @@ impl Engine {
     fn apply_inputs(&mut self, inputs: &Inputs) {
         if inputs.style != self.applied.style {
             load_style(&mut self.map, inputs);
+            self.style_loaded = false;
         }
         let (old, new) = (self.applied.camera, inputs.camera);
         let change = CameraChange {
@@ -268,6 +278,9 @@ impl Engine {
         };
         if change != CameraChange::default() {
             self.map.jump_to(&camera_options(&change));
+        }
+        if inputs.content != self.applied.content {
+            self.content_changed = true;
         }
         self.applied = inputs.clone();
     }
@@ -282,8 +295,9 @@ impl Engine {
                 self.map.fly_to(&camera_options(&animation.camera), &animation_options(animation.duration));
             }
             Command::SetStyle { style } => {
-                self.applied.style = style.clone();
-                load_style(&mut self.map, &Inputs { style, camera: self.applied.camera });
+                self.applied.style = style;
+                load_style(&mut self.map, &self.applied);
+                self.style_loaded = false;
             }
         }
         self.idle = false;
@@ -304,13 +318,16 @@ impl Engine {
             if let GestureEvent::Click { position, .. } = gesture
                 && let Ok(lat_lng) = self.map.lat_lng_for_pixel(&position, WrapMode::Wrapped)
             {
-                events.push(Event::Click {
+                self.click = Some(Click {
                     lng_lat: [lat_lng.longitude(), lat_lng.latitude()],
                     point: [position.x, position.y],
+                    features: self.features_at(position),
                 });
+                events.push(Event::Click);
             }
         }
         self.map_events(events);
+        self.apply_content(events);
         if self.updates.generation() != self.drawn {
             self.idle = false;
             self.draw();
@@ -321,7 +338,7 @@ impl Engine {
             let camera = self.camera();
             if camera != self.rest {
                 self.rest = camera;
-                events.push(Event::Moveend(camera));
+                events.push(Event::Moveend);
             }
         }
         !self.idle || !resting
@@ -330,6 +347,12 @@ impl Engine {
     fn map_events(&mut self, events: &mut Vec<Event>) {
         for event in self.map.drain_events() {
             match event {
+                MapEvent::StyleLoaded => {
+                    // A new style holds none of the content.
+                    self.style_loaded = true;
+                    self.held = Content::default();
+                    self.content_changed = true;
+                }
                 MapEvent::Idle => {
                     self.idle = true;
                     if !self.loaded {
@@ -338,11 +361,59 @@ impl Engine {
                     }
                 }
                 MapEvent::LoadingStarted => self.idle = false,
-                MapEvent::LoadingFailed(error) => events.push(Event::Error { message: format!("maplibre: {error:?}") }),
-                MapEvent::RenderError(error) => events.push(Event::Error { message: format!("maplibre: {}", error.message) }),
+                MapEvent::LoadingFailed(error) => self.fail(format!("maplibre: {error:?}"), events),
+                MapEvent::RenderError(error) => self.fail(format!("maplibre: {}", error.message), events),
                 _ => {}
             }
         }
+    }
+
+    fn apply_content(&mut self, events: &mut Vec<Event>) {
+        if !self.style_loaded || !self.content_changed {
+            return;
+        }
+        self.content_changed = false;
+        let (held, errors) = content::apply(self.map.style_mut(), &self.held, &self.applied.content);
+        self.held = held;
+        if let Some(message) = errors.into_iter().reduce(|all, error| format!("{all}; {error}")) {
+            self.fail(message, events);
+        }
+        self.idle = false;
+    }
+
+    fn fail(&mut self, message: String, events: &mut Vec<Event>) {
+        self.error = Some(message);
+        events.push(Event::Error);
+    }
+
+    /// The features the content's layers drew at `point`, topmost first.
+    fn features_at(&self, point: ScreenCoordinate) -> Vec<protocol::Feature> {
+        if self.held.layers.is_empty() {
+            return Vec::new();
+        }
+        let pad = self.held.hit_padding;
+        let geometry = if pad > 0.0 {
+            let (x0, y0, x1, y1) = (point.x - pad, point.y - pad, point.x + pad, point.y + pad);
+            vec![
+                ScreenCoordinate::new(x0, y0),
+                ScreenCoordinate::new(x1, y0),
+                ScreenCoordinate::new(x1, y1),
+                ScreenCoordinate::new(x0, y1),
+                ScreenCoordinate::new(x0, y0),
+            ]
+        } else {
+            vec![point]
+        };
+        let options = RenderedQueryOptions {
+            layer_ids: Some(self.held.layers.iter().map(|layer| layer.id.clone()).collect()),
+            filter: None,
+        };
+        self.renderer
+            .query_rendered_features(&geometry, &options)
+            .unwrap_or_default()
+            .iter()
+            .map(feature)
+            .collect()
     }
 
     fn draw(&mut self) {
@@ -378,7 +449,36 @@ impl Engine {
     }
 
     fn record(&self) -> Record {
-        Record { camera: self.camera(), loaded: self.loaded && self.idle }
+        // The camera at rest, so the record changes when something happens
+        // and not every frame of a gesture.
+        Record {
+            camera: self.rest,
+            loaded: self.loaded && self.idle,
+            click: self.click.clone(),
+            error: self.error.clone(),
+        }
+    }
+}
+
+fn feature(feature: &mln_util::feature::Feature) -> protocol::Feature {
+    use ::feature::{Identifier, Value as FeatureValue};
+    let properties = match mln_conversion::value_to_json(&FeatureValue::Object(feature.properties.clone())) {
+        Json::Object(properties) => properties,
+        _ => serde_json::Map::new(),
+    };
+    let id = match &feature.id {
+        Identifier::Null => Json::Null,
+        Identifier::Uint(id) => Json::from(*id),
+        Identifier::Int(id) => Json::from(*id),
+        Identifier::Double(id) => Json::from(*id),
+        Identifier::String(id) => Json::from(id.clone()),
+    };
+    protocol::Feature {
+        id,
+        layer: feature.layer.clone(),
+        source: feature.source.clone(),
+        source_layer: feature.source_layer.clone(),
+        properties,
     }
 }
 

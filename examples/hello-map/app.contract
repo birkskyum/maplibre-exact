@@ -1,14 +1,34 @@
-// Hello Map: a MapLibre map on a GPU canvas (maplibre-exact), the last event
-// it sent, and a button that flies it somewhere.
+// Hello Map draws a MapLibre map on a GPU canvas (maplibre-exact) with the
+// app's own places over the base style. Tapping a place selects it, which
+// colours it through the content, and the button flies to Zürich.
+shape Content
+  json: string
+
+shape PlaceProperties
+  id: string
+  name: string
+
+shape MapFeature
+  layer: string
+  properties: PlaceProperties
+
+shape MapClick
+  features: MapFeature[]
+
+shape MapRecord
+  zoom: number
+  loaded: bool
+  click: option<MapClick>
+
 routes nav
   home "/"
 
 component HelloMap
-  state last = ""
-  action heard(text: string)
-    last = text
+  resource map = exactSurface("maplibre") as shape MapRecord
+  derive chosen = match map.click { case some(c) => match first(c.features) { case some(f) => f.properties, case none => PlaceProperties(id="", name="") }, case none => PlaceProperties(id="", name="") }
+  resource content = mapContent(chosen.id) as shape Content
   action zurich
-    postMessage(`{"command":"flyTo","center":[8.5417,47.3769],"zoom":12,"duration":2500}`, "maplibre")
+    postMessage(`{"command":"flyTo","center":[8.5417,47.3769],"zoom":14,"duration":2500}`, "maplibre")
   view
     main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" width="100%" height="100%"
       for e in stack(nav) key=e.id
@@ -16,5 +36,5 @@ component HelloMap
           header display="flex" align-items="center"
             text "Hello Map" role="heading" aria-level=1 flex=1
             button "Zürich" press=zurich testId="zurich"
-          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0) flex=1 min-height=0 width="100%" touch-action="none" message=heard aria-label="Map" testId="map"
-          text last padding=8 testId="last"
+          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json) flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+          text (chosen.id == "" ? "Tap a place" : chosen.name) padding=8 testId="chosen"

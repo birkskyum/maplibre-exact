@@ -1,4 +1,4 @@
-//! Hello Map's GPU module: the MapLibre map.
+//! Hello Map's GPU module, which draws the MapLibre map.
 
 use exact_gpu::Registry;
 

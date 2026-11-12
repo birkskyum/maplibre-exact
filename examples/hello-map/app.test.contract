@@ -1,2 +1,3 @@
 test "the map is on screen"
   expect tree has "map"
+  expect text "chosen" == "Tap a place"

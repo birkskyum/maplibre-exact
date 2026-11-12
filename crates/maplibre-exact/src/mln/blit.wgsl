@@ -23,7 +23,7 @@ fn fs(in: Varyings) -> @location(0) vec4f {
     return textureSample(frame_texture, frame_sampler, in.uv);
 }
 
-// For an sRGB target, which encodes what it is given: the frame's values are
+// For an sRGB target, which encodes what it is given. The frame's values are
 // already encoded, so they are decoded first.
 @fragment
 fn fs_linear(in: Varyings) -> @location(0) vec4f {

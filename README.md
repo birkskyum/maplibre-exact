@@ -5,41 +5,53 @@ MapLibre maps in [Exact](https://github.com/expo/exact) apps.
 An early prototype. It runs on macOS and iOS, and [DESIGN.md](DESIGN.md) says how it works and what is
 missing.
 
-An app draws a map on a canvas and talks to it in JSON:
+It takes the approach of [MapLibre Compose](https://github.com/maplibre/maplibre-compose). The app
+declares its own sources and layers over a base style, and when its state changes, the map changes to
+match. An app draws a map on a canvas:
 
 ```text
-canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=8.54, latitude=47.37, zoom=11, bearing=0, pitch=0) message=heard
+resource map = exactSurface("maplibre") as shape MapRecord
+resource content = mapContent(chosen.id) as shape Content
+
+canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=8.54, latitude=47.37, zoom=11, bearing=0, pitch=0, content=content.json)
 ```
 
-```text
-postMessage(`{"command":"flyTo","center":[8.54,47.37],"zoom":14}`, "maplibre")
-```
+- `content` is the app's sources and layers in the
+  [MapLibre Style Specification](https://maplibre.org/maplibre-style-spec/)'s terms, which the data
+  module builds (`{"sources": {…}, "layers": […]}`). The map applies what changed, new GeoJSON data and
+  changed paint and layout properties in place and the rest by adding and removing layers and sources.
+- The map posts `load`, `moveend`, `click` and `error` to the canvas's `message=` action.
+- Its record, `exactSurface("maplibre")`, holds the camera at rest, whether everything in view has
+  loaded, the last click with the content's features under it, and the last error. The app reads it as
+  a shape of its own.
+- Commands go in as JSON, such as
+  ``postMessage(`{"command":"flyTo","center":[8.54,47.37],"zoom":14}`, "maplibre")``.
 
-The map posts `load`, `moveend`, `click` and `error` events to the canvas's `message=` action, and its
-camera is the record `exactSurface("maplibre")`. The names follow MapLibre GL JS.
-[`crates/maplibre-exact/src/protocol.rs`](crates/maplibre-exact/src/protocol.rs) is the whole contract.
+The names follow MapLibre GL JS. [`protocol.rs`](crates/maplibre-exact/src/protocol.rs) is the whole
+contract, and [`examples/hello-map`](examples/hello-map) uses all of it.
 
 ## Backends
 
 The contract doesn't depend on the engine, so a backend can be swapped without touching an app's
 Contract or data module.
 
-- `mln`, the one there is: [mln-rs](https://github.com/louwers/mln-rs), the Rust port of MapLibre
-  Native, drawing on Exact's GPU canvas (wgpu). One engine for every host with a GPU canvas.
-- Native views, not started: MapLibre GL JS on the web, MapLibre Native's iOS and Android SDKs, as an
-  Exact package view that reads and writes the same JSON.
+- `mln` is the main one and the only one so far. [mln-rs](https://github.com/louwers/mln-rs), the
+  Rust port of MapLibre Native, draws on Exact's GPU canvas (wgpu), one engine for every host with a
+  GPU canvas.
+- Native views aren't started. MapLibre GL JS on the web and MapLibre Native's iOS and Android SDKs
+  would each be an Exact package view that reads and writes the same JSON.
 
 ## Layout
 
-- `crates/maplibre-exact`: the protocol and the `mln` surface.
-- `examples/hello-map`: an Exact app with a map, made by `exact new`.
+- `crates/maplibre-exact` holds the protocol and the `mln` surface.
+- `examples/hello-map` is an Exact app with a map, made by `exact new`.
 
 The crate and the example find Exact and mln-rs by path, as checkouts next to this repository
 (`../exact`, `../mln-rs`).
 
 ## Running the example
 
-Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches): two
+Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches), two
 small changes to mln-rs (the offscreen frame as a texture, and a `ureq` requirement Exact can meet), and
 Rust 1.99.1 for Exact, whose 1.97 is older than mln-rs supports. They apply to Exact `85c1b9c5` and
 mln-rs `c558503`, the commits this was built on.
