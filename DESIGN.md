@@ -45,6 +45,25 @@ the app's state, typed in TypeScript.
   `assets/`. The surface asks Exact for each, decodes it with mln-rs and adds it to the style.
 - A click queries the content's layers at the point, widened by `hitPadding`, and the record's `click`
   lists their features topmost first, with `id`, `layer`, `source`, `sourceLayer` and `properties`.
+- `markers` holds children of the canvas at places on the map, by their `testId`, with GL JS's
+  `Marker` options `lngLat`, `anchor` and `offset`. The rest of the canvas's children stay where the
+  layout puts them, as controls over the map do.
+
+## Markers
+
+A marker is a child of the map's canvas in the app's own Contract, such as a callout with a button,
+laid out at its own size (`position="absolute"`). Exact's GPU canvas can hand a surface each of its
+children and ask, after every frame, where the surface put each one (`ChildrenMode::Each` and
+`Surface::placement`). The map answers with the marker's anchor at its place on the map as drawn
+that frame, and Exact hit-tests the child and reports it to accessibility and to an agent there, so
+a marker is tapped, read out and driven like any other node. A marker whose place is off the canvas
+or behind the globe is hidden, which takes it out of hit-testing and accessibility too.
+
+Who draws the marker's pixels depends on the host. On Apple the host paints each child into a
+texture and the map draws the placed ones over its frame, in the same pass, so a marker never lags
+the map. On Android (and Linux and the web) the host draws the child itself at the placement. The
+canvas asks for children one by one only while the content has markers, since capturing each costs
+the host more than its ordinary overlay.
 
 Events reach Contract as plain names because Contract has no JSON reader, and the details go in the
 record, which the app reads as a shape of its own. The record's camera is the one at rest, so the
@@ -80,6 +99,7 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
 | Feature queries and feature state | Not yet |
 | Images and icons | Done, as content `images` from the app's `assets/`, which Exact delivers to the surface |
+| Markers and popups, as GL JS's `Marker` and `Popup` | Done, as content `markers` holding the canvas's Contract children, tappable and accessible |
 | Controls, the compass, scale bar and attribution | The record's `attribution`, which the app shows over the map; no compass or scale bar |
 | Terrain and hillshade | Up to the style; untested on mln-rs |
 | Location, offline, requests, snapshotter | Not yet |
@@ -133,7 +153,7 @@ Found while building the prototype on exact2 `85c1b9c5`.
 
 - macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
-  attribution. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
+  attribution. The callout marker and its button on macOS and Android. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
   wgpu's Vulkan backend, and mln-rs fetches over its ureq transport there, where Apple uses
   NSURLSession.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact
@@ -145,8 +165,8 @@ Found while building the prototype on exact2 `85c1b9c5`.
 - The web, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - The rest of the table above.
-- Markers drawn by the app's Contract. Exact lays a canvas's children out over it and lets the surface
-  place each one (`Surface::placement`), which would give markers the platform's accessibility.
+- Markers that turn and tilt with the map (GL JS's `rotationAlignment` and `pitchAlignment`). A
+  placement is a homography, so it can carry both.
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen share the thread's `RunLoop`, which mln-rs allows, but the record's
   name, `maplibre`, belongs to the first map.

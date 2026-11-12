@@ -1,0 +1,282 @@
+//! The canvas's children that the content's `markers` hold at places on the
+//! map.
+//!
+//! Exact lays out each child of the canvas, hands it to the surface on its
+//! own and asks after every frame where the surface put it, which is where
+//! the child is hit-tested and where accessibility reports it. A child the
+//! markers name goes to its place; the others keep their layout and the host
+//! draws them, as controls over the map. Where the host hands the surface a
+//! child's pixels (Apple), the surface draws the placed children over the
+//! map; elsewhere (Android) the host draws them where the placement says.
+
+use exact_gpu::{Placement, wgpu};
+use mln_map::Map;
+use mln_util::geo::LatLng;
+
+use crate::protocol::Marker;
+
+/// A child of the canvas, as the host last gave it.
+struct Child {
+    /// Its `testId`.
+    name: String,
+    /// Where the layout put it in the canvas, in points: x, y, width, height.
+    frame: [f32; 4],
+    texture: Option<wgpu::TextureView>,
+    group: Option<wgpu::BindGroup>,
+    placement: Option<Placement>,
+}
+
+/// The canvas's children by index.
+#[derive(Default)]
+pub(super) struct Children {
+    children: Vec<Option<Child>>,
+    gpu: Option<Gpu>,
+}
+
+impl Children {
+    /// The host's news of the `index`th child: an empty name and frame with
+    /// no texture is a child gone.
+    pub(super) fn set(&mut self, index: usize, name: &str, texture: Option<&wgpu::TextureView>, frame: [f32; 4]) {
+        if name.is_empty() && texture.is_none() && frame == [0.0; 4] {
+            if let Some(slot) = self.children.get_mut(index) {
+                *slot = None;
+            }
+            while self.children.last().is_some_and(Option::is_none) {
+                self.children.pop();
+            }
+            return;
+        }
+        if self.children.len() <= index {
+            self.children.resize_with(index + 1, || None);
+        }
+        let placement = self.children[index].as_ref().and_then(|child| child.placement);
+        self.children[index] =
+            Some(Child { name: name.to_owned(), frame, texture: texture.cloned(), group: None, placement });
+    }
+
+    pub(super) fn placement(&self, index: usize) -> Option<Placement> {
+        self.children.get(index)?.as_ref()?.placement
+    }
+
+    /// Places each child a marker names at its marker's point on `map`, as
+    /// the map is drawn now, on a canvas of `size` points at `scale` pixels a
+    /// point. A marker whose child lies off the canvas or behind the globe is
+    /// hidden, so it is neither hit nor read out.
+    pub(super) fn place(&mut self, map: &Map, markers: &[Marker], size: [f32; 2], scale: f32) {
+        for (index, child) in self.children.iter_mut().enumerate() {
+            let Some(child) = child else { continue };
+            let marker = markers.iter().find(|marker| marker.id == child.name);
+            child.placement = marker.map(|marker| place(map, marker, child.frame, size, scale, index));
+        }
+    }
+
+    /// Whether a child is placed on the map.
+    pub(super) fn any_placed(&self) -> bool {
+        self.children.iter().flatten().any(|child| child.placement.is_some())
+    }
+
+    /// Draws the placed children the host gave pixels for over what `target`
+    /// holds, in their order, the last on top.
+    pub(super) fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        size: [f32; 2],
+    ) {
+        let drawn: Vec<usize> = (0..self.children.len())
+            .filter(|&index| {
+                self.children[index].as_ref().is_some_and(|child| {
+                    child.texture.is_some() && child.placement.is_some_and(|placement| !placement.hidden)
+                })
+            })
+            .collect();
+        if drawn.is_empty() {
+            return;
+        }
+        let gpu = self.gpu.get_or_insert_with(|| Gpu::new(device));
+        let mut vertices = Vec::with_capacity(drawn.len() * 6 * 4);
+        for &index in &drawn {
+            let child = self.children[index].as_mut().expect("drawn children exist");
+            let placement = child.placement.expect("drawn children are placed");
+            let [x0, y0] = [placement.homography[2], placement.homography[5]];
+            let [x1, y1] = [x0 + child.frame[2], y0 + child.frame[3]];
+            let clip = |x: f32, y: f32| [x / size[0] * 2.0 - 1.0, 1.0 - y / size[1] * 2.0];
+            let corners = [
+                (clip(x0, y0), [0.0, 0.0]),
+                (clip(x1, y0), [1.0, 0.0]),
+                (clip(x0, y1), [0.0, 1.0]),
+                (clip(x1, y1), [1.0, 1.0]),
+            ];
+            for corner in [0, 1, 2, 2, 1, 3] {
+                let ([x, y], [u, v]) = corners[corner];
+                vertices.extend_from_slice(&[x, y, u, v]);
+            }
+            if child.group.is_none() {
+                let view = child.texture.as_ref().expect("drawn children have pixels");
+                child.group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("maplibre marker"),
+                    layout: &gpu.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&gpu.sampler) },
+                    ],
+                }));
+            }
+        }
+        let bytes: Vec<u8> = vertices.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        if gpu.vertices.as_ref().is_none_or(|buffer| buffer.size() < bytes.len() as u64) {
+            gpu.vertices = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("maplibre markers"),
+                size: (bytes.len() as u64).next_power_of_two(),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let pipeline = gpu.pipeline(device, format);
+        let pipeline = &gpu.pipelines[pipeline].1;
+        let buffer = gpu.vertices.as_ref().expect("made above");
+        queue.write_buffer(buffer, 0, &bytes);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("maplibre markers"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        for (n, &index) in drawn.iter().enumerate() {
+            let child = self.children[index].as_ref().expect("drawn children exist");
+            pass.set_bind_group(0, child.group.as_ref(), &[]);
+            let first = (n * 6) as u32;
+            pass.draw(first..first + 6, 0..1);
+        }
+    }
+}
+
+/// Where `marker` puts a child laid out at `frame`, the `index`th of the
+/// canvas's: its anchor at the marker's point plus the offset, on whole
+/// pixels so that its pixels stay sharp.
+fn place(map: &Map, marker: &Marker, frame: [f32; 4], size: [f32; 2], scale: f32, index: usize) -> Placement {
+    let [width, height] = [f64::from(frame[2]), f64::from(frame[3])];
+    let [ax, ay] = marker.anchor.fraction();
+    let at = LatLng::new(marker.lng_lat[1], marker.lng_lat[0]).ok();
+    let point = at.filter(|at| !map.is_location_occluded(at)).map(|at| map.pixel_for_lat_lng(&at));
+    let snap = |n: f64| ((n * f64::from(scale)).round() / f64::from(scale)) as f32;
+    let (x, y, hidden) = match point {
+        Some(point) if point.x.is_finite() && point.y.is_finite() => {
+            let x = snap(point.x - ax * width + marker.offset[0]);
+            let y = snap(point.y - ay * height + marker.offset[1]);
+            let outside = x + frame[2] < 0.0 || y + frame[3] < 0.0 || x > size[0] || y > size[1];
+            (x, y, outside)
+        }
+        _ => (0.0, 0.0, true),
+    };
+    Placement {
+        hidden,
+        homography: [1.0, 0.0, x, 0.0, 1.0, y, 0.0, 0.0, 1.0],
+        depth: index as f32 + 1.0,
+        clip_depth: [[0.0, 0.0, 1.0]; 2],
+    }
+}
+
+/// The pipeline that draws a child's pixels, made at the first marker drawn.
+struct Gpu {
+    module: wgpu::ShaderModule,
+    layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    sampler: wgpu::Sampler,
+    pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+    vertices: Option<wgpu::Buffer>,
+}
+
+impl Gpu {
+    fn new(device: &wgpu::Device) -> Gpu {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("maplibre marker"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("marker.wgsl").into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("maplibre marker"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("maplibre marker"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("maplibre marker"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        Gpu { module, layout, pipeline_layout, sampler, pipelines: Vec::new(), vertices: None }
+    }
+
+    /// The index of the pipeline for `format`, made the first time.
+    fn pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> usize {
+        match self.pipelines.iter().position(|(f, _)| *f == format) {
+            Some(index) => index,
+            None => {
+                let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("maplibre marker"),
+                    layout: Some(&self.pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &self.module,
+                        entry_point: Some("vs"),
+                        buffers: &[Some(wgpu::VertexBufferLayout {
+                            array_stride: 16,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+                        })],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &self.module,
+                        entry_point: Some(if format.is_srgb() { "fs_linear" } else { "fs" }),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                });
+                self.pipelines.push((format, pipeline));
+                self.pipelines.len() - 1
+            }
+        }
+    }
+}

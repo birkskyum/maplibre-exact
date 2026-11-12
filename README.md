@@ -2,8 +2,8 @@
 
 MapLibre maps in [Exact](https://github.com/expo/exact) apps.
 
-An early prototype. It runs on macOS and iOS, and [DESIGN.md](DESIGN.md) says how it works and what is
-missing.
+An early prototype. It runs on macOS, iOS and Android, and [DESIGN.md](DESIGN.md) says how it works and
+what is missing.
 
 It takes the approach of [MapLibre Compose](https://github.com/maplibre/maplibre-compose). The app
 declares its own sources and layers over a base style, and when its state changes, the map changes to
@@ -21,6 +21,10 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
   module builds (`{"sources": {…}, "layers": […], "images": {…}}`), with images from the app's
   `assets/`. The map applies what changed, new GeoJSON data and
   changed paint and layout properties in place and the rest by adding and removing layers and sources.
+- `markers` in the content holds the canvas's children at places on the map, by their `testId`, as GL
+  JS's `Marker` holds an element (`{"callout": {"lngLat": [8.54, 47.38], "anchor": "bottom"}}`). A
+  marker is the app's own Contract, so it keeps its taps and its accessibility, and Exact reports it
+  where the map put it.
 - `options` limits the camera and turns gestures off, with GL JS's `MapOptions` names (`minZoom`,
   `maxZoom`, `minPitch`, `maxPitch`, `maxBounds`, `interactive`, `dragRotate`, `pitchWithRotate`,
   `touchPitch`, `scrollZoom`).

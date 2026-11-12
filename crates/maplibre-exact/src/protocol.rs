@@ -108,7 +108,8 @@ impl Inputs {
 /// such as an `icon-image`, by their paths under the app's `assets/` folder,
 /// written from the app's folder as Contract writes them:
 /// `"pin": "assets/pin.png"`, or `{"src": …, "pixelRatio": 2, "sdf": false}`
-/// as GL JS's `addImage` takes them.
+/// as GL JS's `addImage` takes them. `markers` places the canvas's children
+/// on the map by their `testId` ([`Marker`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Content {
     /// Sources by id.
@@ -120,6 +121,65 @@ pub struct Content {
     /// How many points around a click still hit a feature, which makes small
     /// circles and thin lines easier to tap.
     pub hit_padding: f64,
+    /// Where the canvas's children go on the map.
+    pub markers: Vec<Marker>,
+}
+
+/// A child of the map's canvas held at a place on the map, as GL JS's
+/// `Marker` holds an element: `"markers": {"<testId>": {"lngLat": [lng, lat],
+/// "anchor": "bottom", "offset": [x, y]}}`. The child is the app's own
+/// Contract, laid out at its own size (`position="absolute"`), so it keeps
+/// its taps and its accessibility. A child the markers don't name stays where
+/// the layout puts it, as controls over the map do.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Marker {
+    /// The child's `testId`.
+    #[serde(skip)]
+    pub id: String,
+    /// `[longitude, latitude]` in degrees.
+    pub lng_lat: [f64; 2],
+    /// The part of the child at the place, `center` by default.
+    #[serde(default)]
+    pub anchor: Anchor,
+    /// Points the child moves from there, `[right, down]`.
+    #[serde(default)]
+    pub offset: [f64; 2],
+}
+
+/// The part of a marker at its place, with GL JS's names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Anchor {
+    #[default]
+    Center,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Anchor {
+    /// The anchor's point in the child, as fractions of its width and height
+    /// from its top-left corner.
+    #[must_use]
+    pub fn fraction(self) -> [f64; 2] {
+        match self {
+            Anchor::Center => [0.5, 0.5],
+            Anchor::Top => [0.5, 0.0],
+            Anchor::Bottom => [0.5, 1.0],
+            Anchor::Left => [0.0, 0.5],
+            Anchor::Right => [1.0, 0.5],
+            Anchor::TopLeft => [0.0, 0.0],
+            Anchor::TopRight => [1.0, 0.0],
+            Anchor::BottomLeft => [0.0, 1.0],
+            Anchor::BottomRight => [1.0, 1.0],
+        }
+    }
 }
 
 /// One of the app's layers.
@@ -235,6 +295,21 @@ impl Content {
             }
             Some(_) => return Err("maplibre: content's hitPadding must be a number of points, 0 or more".into()),
         }
+        match object.remove("markers") {
+            None => {}
+            Some(Json::Object(markers)) => {
+                for (id, marker) in markers {
+                    let mut marker: Marker =
+                        serde_json::from_value(marker).map_err(|e| format!("maplibre: content marker {id}: {e}"))?;
+                    if !marker.lng_lat.iter().chain(&marker.offset).all(|n| n.is_finite()) {
+                        return Err(format!("maplibre: content marker {id} must have finite numbers"));
+                    }
+                    marker.id = id;
+                    content.markers.push(marker);
+                }
+            }
+            Some(_) => return Err("maplibre: content's markers must be an object of markers by testId".into()),
+        }
         Ok(content)
     }
 
@@ -329,8 +404,14 @@ pub enum Command {
     FlyTo(Animation),
     /// Shows the box between two `[longitude, latitude]` corners, `padding`
     /// points in from the canvas's edges, animated unless `duration` is 0.
-    FitBounds { bounds: [[f64; 2]; 2], padding: Option<f64>, duration: Option<f64> },
-    SetStyle { style: String },
+    FitBounds {
+        bounds: [[f64; 2]; 2],
+        padding: Option<f64>,
+        duration: Option<f64>,
+    },
+    SetStyle {
+        style: String,
+    },
 }
 
 impl Command {
@@ -431,7 +512,15 @@ pub fn attribution_text<'a>(html: impl IntoIterator<Item = &'a str>) -> String {
                 _ => {}
             }
         }
-        for (entity, c) in [("&copy;", "©"), ("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&")] {
+        for (entity, c) in [
+            ("&copy;", "©"),
+            ("&nbsp;", " "),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&quot;", "\""),
+            ("&#39;", "'"),
+            ("&amp;", "&"),
+        ] {
             text = text.replace(entity, c);
         }
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -551,7 +640,8 @@ mod tests {
 
     #[test]
     fn content_images_are_paths_or_objects() {
-        let content = Content::parse(r#"{"images":{"pin":"assets/pin.png","dot":{"src":"assets/dot@2x.png","pixelRatio":2}}}"#);
+        let content =
+            Content::parse(r#"{"images":{"pin":"assets/pin.png","dot":{"src":"assets/dot@2x.png","pixelRatio":2}}}"#);
         let Ok(content) = content else { panic!("{content:?}") };
         assert_eq!(
             content.images,
@@ -565,6 +655,27 @@ mod tests {
     #[test]
     fn content_with_two_layers_of_one_id_is_refused() {
         assert!(inputs(r#"{"layers":[{"id":"a","type":"background"},{"id":"a","type":"background"}]}"#).is_err());
+    }
+
+    #[test]
+    fn content_markers_are_by_test_id_with_gl_js_anchors() {
+        let mut markers = inputs(
+            r#"{"markers":{"hb":{"lngLat":[8.54,47.38],"anchor":"bottom-left","offset":[0,-4]},"eth":{"lngLat":[8.55,47.38]}}}"#,
+        )
+        .unwrap()
+        .content
+        .markers;
+        markers.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(
+            markers,
+            vec![
+                Marker { id: "eth".into(), lng_lat: [8.55, 47.38], anchor: Anchor::Center, offset: [0.0, 0.0] },
+                Marker { id: "hb".into(), lng_lat: [8.54, 47.38], anchor: Anchor::BottomLeft, offset: [0.0, -4.0] },
+            ]
+        );
+        assert_eq!(Anchor::BottomLeft.fraction(), [0.0, 1.0]);
+        assert!(inputs(r#"{"markers":{"hb":{"lngLat":[8.54,47.38],"anchor":"middle"}}}"#).is_err());
+        assert!(inputs(r#"{"markers":{"hb":{"center":[8.54,47.38]}}}"#).is_err());
     }
 
     #[test]

@@ -13,11 +13,15 @@
 mod blit;
 mod content;
 mod input;
+mod markers;
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use exact_gpu::{AssetChanges, AssetError, Frame, InputEvent, PointerPhase, Surface, SurfaceError, Value, wgpu};
+use exact_gpu::{
+    AssetChanges, AssetError, ChildrenMode, Frame, InputEvent, Placement, PointerPhase, Surface, SurfaceError, Value,
+    wgpu,
+};
 use mln_actor::RunLoop;
 use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
@@ -62,6 +66,8 @@ pub struct MapSurface {
     /// The content's images asked of the host, by path, and those decoded.
     asked: Vec<String>,
     decoded: HashMap<String, PremultipliedImage>,
+    /// The canvas's children, some of which the content places on the map.
+    children: markers::Children,
 }
 
 /// The map and what draws it, made at the first frame, on the device that
@@ -152,8 +158,11 @@ impl Surface for MapSurface {
         }
         let mut events = Vec::new();
         let wants_frame = engine.frame(frame, &self.decoded, &mut events);
+        let size = [frame.width, frame.height];
+        self.children.place(&engine.map, &inputs.content.markers, size, frame.scale);
         if let Some(texture) = engine.target.color_texture() {
             engine.blit.draw(device, encoder, target, format, &texture);
+            self.children.draw(device, queue, encoder, target, format, size);
         }
         if let Some(refusal) = engine.refusal.take() {
             self.error = Some(SurfaceError(refusal));
@@ -169,11 +178,8 @@ impl Surface for MapSurface {
     /// app's folder, as Contract does (`assets/pin.png`), and the host takes
     /// names inside `assets/`.
     fn assets(&mut self) -> AssetChanges {
-        let wanted: Vec<String> = self
-            .inputs
-            .iter()
-            .flat_map(|inputs| inputs.content.images.iter().map(|image| image.src.clone()))
-            .collect();
+        let wanted: Vec<String> =
+            self.inputs.iter().flat_map(|inputs| inputs.content.images.iter().map(|image| image.src.clone())).collect();
         let retired: Vec<String> =
             self.asked.iter().filter(|src| !wanted.contains(src)).filter_map(|src| in_assets(src)).collect();
         self.asked.retain(|src| wanted.contains(src));
@@ -296,6 +302,21 @@ impl Surface for MapSurface {
 
     fn take_error(&mut self) -> Option<SurfaceError> {
         self.error.take()
+    }
+
+    /// Each child on its own once the content places some on the map, and
+    /// the host's ordinary overlay otherwise, which costs it less.
+    fn children_mode(&self) -> ChildrenMode {
+        let placing = self.inputs.as_ref().is_some_and(|inputs| !inputs.content.markers.is_empty());
+        if placing || self.children.any_placed() { ChildrenMode::Each } else { ChildrenMode::Overlay }
+    }
+
+    fn child(&mut self, index: usize, name: &str, texture: Option<&wgpu::TextureView>, frame: [f32; 4]) {
+        self.children.set(index, name, texture, frame);
+    }
+
+    fn placement(&self, index: usize) -> Option<Placement> {
+        self.children.placement(index)
     }
 }
 
@@ -582,12 +603,7 @@ impl Engine {
             layer_ids: Some(self.held.layers.iter().map(|layer| layer.id.clone()).collect()),
             filter: None,
         };
-        self.renderer
-            .query_rendered_features(&geometry, &options)
-            .unwrap_or_default()
-            .iter()
-            .map(feature)
-            .collect()
+        self.renderer.query_rendered_features(&geometry, &options).unwrap_or_default().iter().map(feature).collect()
     }
 
     fn draw(&mut self) {

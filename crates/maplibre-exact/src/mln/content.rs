@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error as ConversionError};
-use mln_util::image::PremultipliedImage;
 use mln_style::Style;
 use mln_style::conversion::{convert_layer, convert_source};
 use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_util::image::PremultipliedImage;
 use serde_json::Value as Json;
 
 use crate::protocol::{Content, Layer};
@@ -166,11 +166,7 @@ fn first_of_type(style: &Style, content: &Content, kind: &str) -> Option<String>
 
 /// The ids of `layers` that `other` has too, in `layers`' order.
 fn order<'a>(layers: &'a [Layer], other: &Content) -> Vec<&'a str> {
-    layers
-        .iter()
-        .filter(|layer| other.layers.iter().any(|o| o.id == layer.id))
-        .map(|layer| layer.id.as_str())
-        .collect()
+    layers.iter().filter(|layer| other.layers.iter().any(|o| o.id == layer.id)).map(|layer| layer.id.as_str()).collect()
 }
 
 fn source_of(layer: &Json) -> String {
@@ -379,7 +375,8 @@ mod tests {
         let pin = content(r#"{"images":{"pin":"assets/pin.png"}}"#);
         let (held, _) = apply(&mut style, &Content::default(), &pin, &HashMap::new());
         assert!(style.get_image("pin").is_none());
-        let decoded = HashMap::from([("assets/pin.png".to_owned(), PremultipliedImage::new(mln_util::size::Size::new(4, 4)))]);
+        let decoded =
+            HashMap::from([("assets/pin.png".to_owned(), PremultipliedImage::new(mln_util::size::Size::new(4, 4)))]);
         let (held, errors) = apply(&mut style, &held, &pin, &decoded);
         assert_eq!(errors, Vec::<String>::new());
         assert!(style.get_image("pin").is_some());

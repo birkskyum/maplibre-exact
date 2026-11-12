@@ -1,8 +1,10 @@
 // Hello Map draws a MapLibre map on a GPU canvas (maplibre-exact) with the
 // app's own places over the base style. Tapping a place selects it, which
-// colours it through the content, and the button flies to Zürich.
+// colours it through the content and opens a callout over it, a marker the
+// map holds at the place. The buttons fly to Zürich and show the places.
 shape Content
   json: string
+  fly: string
 
 shape PlaceProperties
   id: string
@@ -32,6 +34,8 @@ component HelloMap
     postMessage(`{"command":"flyTo","center":[8.5417,47.3769],"zoom":14,"duration":2500}`, "maplibre")
   action showPlaces
     postMessage(`{"command":"fitBounds","bounds":[[8.5402,47.3653],[8.5481,47.3779]],"padding":48,"duration":1500}`, "maplibre")
+  action flyChosen
+    postMessage(content.fly, "maplibre")
   view
     main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" width="100%" height="100%"
       for e in stack(nav) key=e.id
@@ -41,6 +45,10 @@ component HelloMap
             button "Zürich" press=zurich testId="zurich"
             button "Places" press=showPlaces testId="places"
           canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json, options=`{"minZoom":3,"maxZoom":18}`) position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+            if chosen.id != ""
+              column position="absolute" display="flex" flex-direction="column" align-items="center" gap=4 padding="8px 12px" border-radius=10 background-color="-exact-secondary-grouped-background" border-width=1 border-style="solid" border-color="-exact-separator" testId="callout"
+                text chosen.name font-weight=600 testId="callout-name"
+                button "Fly here" press=flyChosen testId="fly-chosen"
             if map.attribution != ""
               text map.attribution position="absolute" right=0 bottom=0 font-size=11 padding="2px 6px" color="#333333" background-color="#ffffffcc" testId="attribution"
           text (chosen.id == "" ? "Tap a place" : chosen.name) padding=8 testId="chosen"

@@ -14,7 +14,8 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
   (id) => places.find((place) => place.id === id)!.coordinates,
 );
 
-// The map's own sources and layers, in the MapLibre Style Specification's terms.
+// The map's own sources and layers, in the MapLibre Style Specification's
+// terms, and the callout's place over the chosen pin, which is 32 points tall.
 const content = (chosen: string) => ({
   hitPadding: 8,
   images: {
@@ -62,10 +63,20 @@ const content = (chosen: string) => ({
       paint: { 'text-color': '#1c2024', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
     },
   ],
+  markers: Object.fromEntries(
+    places
+      .filter((place) => place.id === chosen)
+      .map((place) => ['callout', { lngLat: place.coordinates, anchor: 'bottom', offset: [0, -36] }]),
+  ),
 });
 
+const fly = (chosen: string) => {
+  const place = places.find((p) => p.id === chosen);
+  return place ? JSON.stringify({ command: 'flyTo', center: place.coordinates, zoom: 16, duration: 2000 }) : '';
+};
+
 const sources: Sources = {
-  mapContent: ([chosen]): Result<'mapContent'> => ({ json: JSON.stringify(content(chosen)) }),
+  mapContent: ([chosen]): Result<'mapContent'> => ({ json: JSON.stringify(content(chosen)), fly: fly(chosen) }),
 };
 export const answer: Answer = (source, args, store, storage, native) =>
   sources[source](args, store, storage, native);
