@@ -1,4 +1,4 @@
-From c9db5fc89431843fed9f8c511c20d2094aeecfd3 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 17:01:54 +0100
 Subject: [PATCH 2/2] Trust Android's system certificates without the platform
@@ -60,6 +60,3 @@ index 5499aad..fc04638 100644
  impl Client {
      fn new() -> Self {
          Self::with_parts(TcpConnector::default(), DefaultResolver::default())
--- 
-2.56.0
-

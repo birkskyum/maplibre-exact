@@ -68,11 +68,14 @@ Clone Exact and mln-rs next to this repository and apply the patches in [`patche
 gets two, which give a host the offscreen frame as a texture and trust Android's system certificates
 without Java. Exact gets three, which build it with Rust
 1.99.1, as mln-rs needs, let its crates take ureq 3.5, as mln-rs does, and adapt `ibex2` to ureq 3.5.
-They apply to Exact `85c1b9c5` and mln-rs `c558503`, the commits this was built on.
+Both projects change every day, so check out the commits this was last built on, Exact `b5ad88a1`
+and mln-rs `b2d0bcc`, before applying them.
 
 ```sh
-git clone https://github.com/expo/exact && git -C exact am ../maplibre-exact/patches/exact/*.patch
-git clone https://github.com/louwers/mln-rs && git -C mln-rs am ../maplibre-exact/patches/mln-rs/*.patch
+git clone https://github.com/expo/exact && git -C exact checkout -b maplibre-exact b5ad88a1
+git -C exact am ../maplibre-exact/patches/exact/*.patch
+git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b exact-host-texture b2d0bcc
+git -C mln-rs am ../maplibre-exact/patches/mln-rs/*.patch
 bun exact/scripts/exact.mjs setup
 ```
 

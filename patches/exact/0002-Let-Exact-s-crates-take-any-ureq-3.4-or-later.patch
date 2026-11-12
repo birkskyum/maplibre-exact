@@ -1,4 +1,4 @@
-From 1dc5d464175dd4a7fbee25aa78bc7d95f19245be Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 14:52:16 +0100
 Subject: [PATCH 2/3] Let Exact's crates take any ureq 3.4 or later
@@ -24,10 +24,10 @@ index f37e46ba..8cf7b7b8 100644
  # `build.rs` generates the seam's Rust types from `../shapes.contract`
  # with `contract rust` (LLP 1101.002 P9).
 diff --git a/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml b/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml
-index ec568754..88b8d0a9 100644
+index 676e7071..ebeb7cea 100644
 --- a/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml
 +++ b/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml
-@@ -17,4 +17,4 @@ serde_json = "1"
+@@ -19,4 +19,4 @@ serde_json = "1"
  sha2 = "0.10"
  tar = "0.4"
  tempfile = "3"
@@ -83,6 +83,3 @@ index e8c1893e..7fed92b7 100644
  rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
  rustls-native-certs = { version = "0.7", optional = true }
  webpki-roots = { version = "1", optional = true }
--- 
-2.56.0
-

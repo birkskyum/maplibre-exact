@@ -1,4 +1,4 @@
-From 2980cf2b73d595152b23eb9de27c938a6df1ed8f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 13:33:47 +0100
 Subject: [PATCH 1/2] Give hosts the offscreen target's color texture
@@ -45,6 +45,3 @@ index ef77027..83d2600 100644
      fn row_strides(&self) -> (u32, u32) {
          let row_stride = self.size.width * 4; // RGBA8 output
          (row_stride, row_stride.next_multiple_of(BYTES_PER_ROW_ALIGNMENT))
--- 
-2.56.0
-

@@ -117,7 +117,7 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 
 ## What Exact would need to change
 
-Found while building the prototype on exact2 `85c1b9c5`.
+Found while building the prototype on exact2 `85c1b9c5`, which it has since moved to `b5ad88a1`.
 
 1. **A package can't ship a GPU surface.** Surfaces are registered in the app's own `gpu/` crate, so
    each app writes a three-line registry naming `maplibre_exact::mln::surface`. A package that could
@@ -135,7 +135,9 @@ Found while building the prototype on exact2 `85c1b9c5`.
    Ctrl-drag to rotate and a trackpad's magnify and rotate can't be recognized. Two-finger touch
    pinch works.
 5. **`exact lock` resolves offline first and fails rather than fetching** when a new dependency needs
-   a version the offline index lacks (`objc2` 0.6.5 here). A plain `cargo metadata` fetched it.
+   a version the offline index lacks (`objc2` 0.6.5 here). A plain `cargo metadata` fetched it. It
+   also keeps a locked version that a path dependency has since ruled out (`thiserror` 2.0.20, once
+   mln-rs asked for `^2.0.21`) and fails, where `cargo update -p thiserror` raises just that one.
 6. **An Android build of an app with no icons fails** writing `icons/res.key` into a folder it never
    made. The example declares an icon.
 7. **A message to a canvas with no `message=` action** is ignored on Apple and refused on Android

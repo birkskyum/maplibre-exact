@@ -1,4 +1,4 @@
-From b610b6f9bb30750aede39fe4cd2b482f9d4af112 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 14:55:09 +0100
 Subject: [PATCH 3/3] Build ibex2 against ureq 3.5's NextTimeout
@@ -32,6 +32,3 @@ index 7ba528ce..8ba06c10 100644
              };
              observed.await_input(timeout).unwrap();
              let mut expected = timeout;
--- 
-2.56.0
-
