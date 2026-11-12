@@ -1,0 +1,50 @@
+From 2980cf2b73d595152b23eb9de27c938a6df1ed8f Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Thu, 12 Nov 2026 13:33:47 +0100
+Subject: [PATCH 1/2] Give hosts the offscreen target's color texture
+
+---
+ crates/mln_webgpu/src/offscreen_target.rs  | 10 ++++++++++
+ crates/mln_webgpu/src/offscreen_texture.rs |  5 +++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/crates/mln_webgpu/src/offscreen_target.rs b/crates/mln_webgpu/src/offscreen_target.rs
+index 3495600..a50ee2f 100644
+--- a/crates/mln_webgpu/src/offscreen_target.rs
++++ b/crates/mln_webgpu/src/offscreen_target.rs
+@@ -53,6 +53,16 @@ impl OffscreenTarget {
+         let resource = downcast_resource::<OffscreenTextureResource>(&**image.as_ref()?)?;
+         Some(resource.read_still_image())
+     }
++
++    /// The `Rgba8Unorm` texture the last frame was drawn into, premultiplied,
++    /// or `None` before the first frame of the size. A host that shares the
++    /// device samples or copies it in commands it submits after the frame;
++    /// the next frame draws into the same texture.
++    pub fn color_texture(&self) -> Option<wgpu::Texture> {
++        let image = self.image.borrow();
++        let resource = downcast_resource::<OffscreenTextureResource>(&**image.as_ref()?)?;
++        resource.color_texture()
++    }
+ }
+ 
+ impl FrameTarget for OffscreenTarget {
+diff --git a/crates/mln_webgpu/src/offscreen_texture.rs b/crates/mln_webgpu/src/offscreen_texture.rs
+index ef77027..83d2600 100644
+--- a/crates/mln_webgpu/src/offscreen_texture.rs
++++ b/crates/mln_webgpu/src/offscreen_texture.rs
+@@ -122,6 +122,11 @@ impl OffscreenTextureResource {
+         self.color_texture.borrow().clone()
+     }
+ 
++    /// The color texture, once it has been made.
++    pub fn color_texture(&self) -> Option<wgpu::Texture> {
++        self.color()?.borrow().get_texture().cloned()
++    }
++
+     fn row_strides(&self) -> (u32, u32) {
+         let row_stride = self.size.width * 4; // RGBA8 output
+         (row_stride, row_stride.next_multiple_of(BYTES_PER_ROW_ALIGNMENT))
+-- 
+2.56.0
+
