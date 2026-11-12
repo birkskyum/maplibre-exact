@@ -1,26 +1,36 @@
 // Hello Map draws a MapLibre map on a GPU canvas (maplibre-exact) with the
-// app's own places over the base style. Tapping a place selects it, which
-// colours it through the content and opens a callout over it, a marker the
-// map holds at the place. The buttons fly to Zürich and show the places.
+// app's own places over the base style, clustered when zoomed out. Tapping a
+// place selects it, which colours it through the content and opens a callout
+// over it, a marker the map holds at the place; tapping a cluster zooms in
+// until it splits. A long press drops a pin there. The buttons fly to Zürich
+// and show the places.
 shape Content
   json: string
   fly: string
 
+// A place's properties; a cluster's have neither.
 shape PlaceProperties
-  id: string
-  name: string
+  id: option<string>
+  name: option<string>
 
 shape MapFeature
   layer: string
   properties: PlaceProperties
+  clusterExpansionZoom: option<number>
+
+shape LngLat
+  lng: number
+  lat: number
 
 shape MapClick
+  lngLat: LngLat
   features: MapFeature[]
 
 shape MapRecord
   zoom: number
   loaded: bool
   click: option<MapClick>
+  contextmenu: option<MapClick>
   attribution: string
 
 routes nav
@@ -28,14 +38,24 @@ routes nav
 
 component HelloMap
   resource map = exactSurface("maplibre") as shape MapRecord
-  derive chosen = match map.click { case some(c) => match first(c.features) { case some(f) => f.properties, case none => PlaceProperties(id="", name="") }, case none => PlaceProperties(id="", name="") }
-  resource content = mapContent(chosen.id) as shape Content
+  derive clicked = match map.click { case some(c) => c.features, case none => [] }
+  derive place = match first(clicked.filter(f => f.layer == "places")) { case some(f) => f.properties, case none => PlaceProperties(id=none, name=none) }
+  derive chosenId = match place.id { case some(id) => id, case none => "" }
+  derive chosenName = match place.name { case some(name) => name, case none => "" }
+  // The camera that splits a tapped cluster, as text to post.
+  derive expand = match map.click { case some(c) => match first(c.features.filter(f => f.layer == "clusters")) { case some(f) => match f.clusterExpansionZoom { case some(z) => `{"command":"easeTo","center":[${c.lngLat.lng},${c.lngLat.lat}],"zoom":${z}}`, case none => "" }, case none => "" }, case none => "" }
+  derive dropped = match map.contextmenu { case some(c) => [c.lngLat.lng, c.lngLat.lat], case none => [] }
+  derive droppedLabel = match map.contextmenu { case some(c) => `Dropped pin ${formatNumber(c.lngLat.lat, "decimal")}, ${formatNumber(c.lngLat.lng, "decimal")}`, case none => "" }
+  resource content = mapContent(chosenId, dropped) as shape Content
   action zurich
     postMessage(`{"command":"flyTo","center":[8.5417,47.3769],"zoom":14,"duration":2500}`, "maplibre")
   action showPlaces
     postMessage(`{"command":"fitBounds","bounds":[[8.5402,47.3653],[8.5481,47.3779]],"padding":48,"duration":1500}`, "maplibre")
   action flyChosen
     postMessage(content.fly, "maplibre")
+  action onMap(event: string)
+    if event == "click" and expand != ""
+      postMessage(expand, "maplibre")
   view
     main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" width="100%" height="100%"
       for e in stack(nav) key=e.id
@@ -44,11 +64,15 @@ component HelloMap
             text "Hello Map" role="heading" aria-level=1 flex=1
             button "Zürich" press=zurich testId="zurich"
             button "Places" press=showPlaces testId="places"
-          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json, options=`{"minZoom":3,"maxZoom":18}`) position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
-            if chosen.id != ""
+          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json, options=`{"minZoom":3,"maxZoom":18}`, events="click contextmenu") message=onMap position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+            if droppedLabel != ""
+              column position="absolute" display="flex" flex-direction="column" align-items="center" gap=2 testId="dropped"
+                text droppedLabel font-size=12 padding="4px 8px" border-radius=8 background-color="-exact-secondary-grouped-background"
+                image "assets/pin-selected.png" width=24 height=32 aria-label="Dropped pin"
+            if chosenId != ""
               column position="absolute" display="flex" flex-direction="column" align-items="center" gap=4 padding="8px 12px" border-radius=10 background-color="-exact-secondary-grouped-background" border-width=1 border-style="solid" border-color="-exact-separator" testId="callout"
-                text chosen.name font-weight=600 testId="callout-name"
+                text chosenName font-weight=600 testId="callout-name"
                 button "Fly here" press=flyChosen testId="fly-chosen"
             if map.attribution != ""
               text map.attribution position="absolute" right=0 bottom=0 font-size=11 padding="2px 6px" color="#333333" background-color="#ffffffcc" testId="attribution"
-          text (chosen.id == "" ? "Tap a place" : chosen.name) padding=8 testId="chosen"
+          text (chosenId == "" ? "Tap a place" : chosenName) padding=8 testId="chosen"

@@ -44,7 +44,11 @@ the app's state, typed in TypeScript.
 - `images` names the app's images that layers use, such as an `icon-image`, by their paths under
   `assets/`. The surface asks Exact for each, decodes it with mln-rs and adds it to the style.
 - A click queries the content's layers at the point, widened by `hitPadding`, and the record's `click`
-  lists their features topmost first, with `id`, `layer`, `source`, `sourceLayer` and `properties`.
+  lists their features topmost first, with `id`, `layer`, `source`, `sourceLayer` and `properties`,
+  and its `lngLat` and `point` as GL JS's `MapMouseEvent` has them (`{lng, lat}`, `{x, y}`). A
+  secondary click or a touch held still for half a second is a `contextmenu`, as a browser makes
+  one, and its release is no click. A cluster's feature carries `clusterExpansionZoom`, the zoom
+  GL JS's `getClusterExpansionZoom` answers, so the app can zoom in to split it with one command.
 - `markers` holds children of the canvas at places on the map, by their `testId`, with GL JS's
   `Marker` options `lngLat`, `anchor` and `offset`. The rest of the canvas's children stay where the
   layout puts them, as controls over the map do.
@@ -93,10 +97,10 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 |---|---|
 | Composition, a base style plus declared sources and layers, diffed | Done, as `content` |
 | Layers, with GeoJSON and tiled sources, expressions and `beforeId` | Done, and `beforeType` draws under the base style's first layer of a type, as `Anchor.Below` does |
-| Interaction, with clicks on the map and its layers and hit padding | Done, and `options` turns off rotating, pitching, scroll zoom or every gesture, keeping clicks; no long press |
-| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record, with zoom, pitch and bounds limits in `options`; no camera padding |
+| Interaction, with clicks on the map and its layers and hit padding | Done, with long presses and secondary clicks as `contextmenu`, and `options` turns off rotating, pitching, scroll zoom or every gesture, keeping clicks |
+| Camera state and `animateTo` | `jumpTo`, `easeTo`, `flyTo`, `fitBounds` and the record, with camera `padding` and zoom, pitch and bounds limits in `options` |
 | Styling, switching styles at run time and keeping content | Done, with the `setStyle` command or a new `style` |
-| Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
+| Clustering | Done, with the GeoJSON source's cluster options and each clicked cluster's expansion zoom |
 | Feature queries and feature state | Not yet |
 | Images and icons | Done, as content `images` from the app's `assets/`, which Exact delivers to the surface |
 | Markers and popups, as GL JS's `Marker` and `Popup` | Done, as content `markers` holding the canvas's Contract children, tappable and accessible |
@@ -153,7 +157,8 @@ Found while building the prototype on exact2 `85c1b9c5`.
 
 - macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
-  attribution. The callout marker and its button on macOS and Android. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
+  attribution. The callout marker and its button, clusters zooming in, camera padding and a
+  right-click on macOS, and the callout and a long press on Android. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
   wgpu's Vulkan backend, and mln-rs fetches over its ureq transport there, where Apple uses
   NSURLSession.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact

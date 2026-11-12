@@ -25,7 +25,7 @@ use exact_gpu::{
 use mln_actor::RunLoop;
 use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
-use mln_map::{AnimationOptions, BoundOptions, CameraOptions, Map, MapEvent, MapOptions, UpdateReader};
+use mln_map::{AnimationOptions, BoundOptions, CameraOptions, Map, MapEvent, MapOptions, MapProjection, UpdateReader};
 use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
@@ -34,7 +34,9 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use serde_json::Value as Json;
 
-use crate::protocol::{self, Camera, CameraChange, Click, Command, Content, Event, Inputs, Options, Record};
+use crate::protocol::{
+    self, Camera, CameraChange, Click, Command, Content, Event, Inputs, LngLat, Options, Padding, Point, Record,
+};
 
 /// The factory a GPU module's registry names.
 #[must_use]
@@ -50,6 +52,10 @@ thread_local! {
 
 /// How long one frame may spend on the loop's work before it draws.
 const LOOP_BUDGET: std::time::Duration = std::time::Duration::from_millis(4);
+
+/// How long a touch stays still to be a long press, in milliseconds: iOS's
+/// `UILongPressGestureRecognizer` default, and about Android's.
+const LONG_PRESS_MS: f64 = 500.0;
 
 /// A map on a canvas.
 #[derive(Default)]
@@ -83,10 +89,14 @@ struct Engine {
     gestures: GestureRecognizer,
     /// Pointers down on the map.
     pointers: u32,
-    /// Where and when each pointer went down, for clicks while gestures
-    /// don't move the map, and the clicks found that way.
-    presses: Vec<(u32, ScreenCoordinate, f64)>,
-    clicks: Vec<ScreenCoordinate>,
+    /// The pointers down that haven't moved, for long presses, and for
+    /// clicks while gestures don't move the map.
+    presses: Vec<Press>,
+    /// Clicks the surface found itself, each a click or a context menu.
+    clicks: Vec<(ScreenCoordinate, Event)>,
+    /// How many of the recognizer's coming clicks end long presses, which
+    /// were context menus already.
+    long_pressed: u32,
     /// The generation of the last update drawn.
     drawn: u64,
     /// The arguments the map last took.
@@ -102,6 +112,7 @@ struct Engine {
     loaded: bool,
     animating: bool,
     click: Option<Click>,
+    contextmenu: Option<Click>,
     error: Option<String>,
     /// The last failure that refuses the canvas, until the surface reports it.
     refusal: Option<String>,
@@ -110,6 +121,21 @@ struct Engine {
     pixel_ratio: f32,
     /// The map's clock at a host millisecond.
     epoch: (TimePoint, f64),
+}
+
+/// A pointer down on the map that hasn't moved.
+struct Press {
+    id: u32,
+    /// Where it went down.
+    at: ScreenCoordinate,
+    /// When it went down, in the host's milliseconds.
+    since: f64,
+    /// A finger or a pen, which a long press is made with.
+    touch: bool,
+    /// The secondary mouse button, whose click opens a context menu.
+    secondary: bool,
+    /// Whether it has been held long enough to be a long press.
+    long: bool,
 }
 
 impl MapSurface {
@@ -272,10 +298,10 @@ impl Surface for MapSurface {
             InputEvent::Blur { .. } => engine.pointers = 0,
             _ => {}
         }
-        if !engine.applied.options.interactive() {
-            self.input_changed = engine.press(event);
-        } else if let Some((input, at_ms)) = input::translate(event) {
-            self.input_changed = engine.gestures.handle(&mut engine.map, input, at_ms) || engine.pointers > 0;
+        let interactive = engine.applied.options.interactive();
+        self.input_changed = engine.press(event, interactive);
+        if interactive && let Some((input, at_ms)) = input::translate(event) {
+            self.input_changed |= engine.gestures.handle(&mut engine.map, input, at_ms) || engine.pointers > 0;
         }
     }
 
@@ -346,6 +372,7 @@ impl Engine {
             pointers: 0,
             presses: Vec::new(),
             clicks: Vec::new(),
+            long_pressed: 0,
             drawn: 0,
             rest: inputs.camera,
             applied: inputs,
@@ -356,6 +383,7 @@ impl Engine {
             loaded: false,
             animating: false,
             click: None,
+            contextmenu: None,
             error: None,
             refusal: None,
             attribution: String::new(),
@@ -383,6 +411,7 @@ impl Engine {
             zoom: (new.zoom != old.zoom).then_some(new.zoom),
             bearing: (new.bearing != old.bearing).then_some(new.bearing),
             pitch: (new.pitch != old.pitch).then_some(new.pitch),
+            padding: None,
         };
         if change != CameraChange::default() {
             self.map.jump_to(&camera_options(&change));
@@ -426,27 +455,57 @@ impl Engine {
         self.gestures.set_options(gestures);
     }
 
-    /// Notes a press and release that stayed in place, while gestures don't
-    /// move the map and so report no clicks.
-    fn press(&mut self, event: &InputEvent) -> bool {
-        let InputEvent::Pointer { id, phase, x, y, at_ms, .. } = event else { return false };
+    /// Follows the pointers that stay in place, for long presses, and, while
+    /// gestures don't move the map and so report none, for clicks. Returns
+    /// whether it found a click.
+    fn press(&mut self, event: &InputEvent, interactive: bool) -> bool {
+        let InputEvent::Pointer { id, phase, x, y, kind, buttons, at_ms, .. } = event else { return false };
         let point = ScreenCoordinate::new(f64::from(*x), f64::from(*y));
-        match phase {
-            PointerPhase::Down => self.presses.push((*id, point, *at_ms)),
-            PointerPhase::Up => {
-                let tolerance = self.gestures.options().click_tolerance;
-                if let Some(index) = self.presses.iter().position(|(down, _, _)| down == id) {
-                    let (_, start, _) = self.presses.remove(index);
-                    if (start.x - point.x).hypot(start.y - point.y) <= tolerance {
-                        self.clicks.push(point);
-                        return true;
-                    }
+        let tolerance = self.gestures.options().click_tolerance;
+        let index = self.presses.iter().position(|press| press.id == *id);
+        match (phase, index) {
+            (PointerPhase::Down, _) => self.presses.push(Press {
+                id: *id,
+                at: point,
+                since: *at_ms,
+                touch: *kind != exact_gpu::PointerKind::Mouse,
+                secondary: buttons & 2 != 0,
+                long: false,
+            }),
+            (PointerPhase::Move, Some(index)) => {
+                let press = &self.presses[index];
+                if (press.at.x - point.x).hypot(press.at.y - point.y) > tolerance {
+                    self.presses.remove(index);
                 }
             }
-            PointerPhase::Cancel => self.presses.retain(|(down, _, _)| down != id),
-            PointerPhase::Move => {}
+            (PointerPhase::Up, Some(index)) => {
+                let press = self.presses.remove(index);
+                let still = (press.at.x - point.x).hypot(press.at.y - point.y) <= tolerance;
+                if press.long {
+                    self.long_pressed += u32::from(interactive);
+                } else if still && !interactive {
+                    self.clicks.push((point, if press.secondary { Event::Contextmenu } else { Event::Click }));
+                    return true;
+                }
+            }
+            (PointerPhase::Cancel, Some(index)) => {
+                self.presses.remove(index);
+            }
+            _ => {}
         }
         false
+    }
+
+    /// Turns a touch held still, alone, into a context menu.
+    fn long_press(&mut self, now_ms: f64) {
+        if let [press] = self.presses.as_mut_slice()
+            && press.touch
+            && !press.long
+            && now_ms - press.since >= LONG_PRESS_MS
+        {
+            press.long = true;
+            self.clicks.push((press.at, Event::Contextmenu));
+        }
     }
 
     /// Runs `command`, posted at `at_ms` on the host's clock, where an
@@ -461,16 +520,8 @@ impl Engine {
             Command::FlyTo(animation) => {
                 self.map.fly_to(&camera_options(&animation.camera), &animation_options(animation.duration));
             }
-            Command::FitBounds { bounds: [[west, south], [east, north]], padding, duration } => {
-                let padding = padding.unwrap_or_default();
-                let corners = (LatLng::new(south, west), LatLng::new(north, east));
-                let camera = match (corners, EdgeInsets::new(padding, padding, padding, padding)) {
-                    ((Ok(a), Ok(b)), Ok(insets)) => {
-                        self.map.camera_for_lat_lng_bounds(&LatLngBounds::hull(a, b), &insets, None, None)
-                    }
-                    _ => Err(mln_util::Error::invalid_argument("bounds or padding out of range")),
-                };
-                match camera {
+            Command::FitBounds { bounds, padding, duration } => {
+                match self.camera_for_bounds(bounds, padding.unwrap_or_default()) {
                     Ok(camera) if duration == Some(0.0) => self.map.jump_to(&camera),
                     Ok(camera) => self.map.ease_to(&camera, &animation_options(duration)),
                     Err(e) => self.error = Some(format!("maplibre: fitBounds: {}", e.message)),
@@ -485,6 +536,26 @@ impl Engine {
         self.idle = false;
     }
 
+    /// The camera that shows `bounds` with `padding` points to spare inside
+    /// the map's own padding, as GL JS's `fitBounds` finds it: the map keeps
+    /// its padding, and the center moves to make up for an uneven `padding`.
+    fn camera_for_bounds(&self, bounds: [[f64; 2]; 2], padding: Padding) -> Result<CameraOptions, mln_util::Error> {
+        let [[west, south], [east, north]] = bounds;
+        let kept = self.map.get_camera_options(None).padding.unwrap_or_default();
+        let [top, left, bottom, right] = padding.edges();
+        let total = EdgeInsets::new(kept.top + top, kept.left + left, kept.bottom + bottom, kept.right + right)?;
+        let bounds = LatLngBounds::hull(LatLng::new(south, west)?, LatLng::new(north, east)?);
+        let mut camera = self.map.camera_for_lat_lng_bounds(&bounds, &total, None, None)?;
+        let mut projection = MapProjection::new(&self.map);
+        projection.set_camera(&camera);
+        let [width, height] = [f64::from(self.size.width), f64::from(self.size.height)];
+        let focus =
+            ScreenCoordinate::new((kept.left + width - kept.right) / 2.0, (kept.top + height - kept.bottom) / 2.0);
+        camera.center = Some(projection.lat_lng_for_pixel(&focus, WrapMode::Wrapped)?);
+        camera.padding = Some(kept);
+        Ok(camera)
+    }
+
     /// Runs the loop, the gestures and the map for `frame`, draws the map's
     /// latest update, and returns whether the map wants another frame.
     fn frame(&mut self, frame: &Frame, decoded: &HashMap<String, PremultipliedImage>, events: &mut Vec<Event>) -> bool {
@@ -495,19 +566,31 @@ impl Engine {
         });
         self.map.set_frame_time(Some(self.map_time(frame.now_ms)));
         self.animating = self.gestures.frame(&mut self.map, frame.now_ms);
+        self.long_press(frame.now_ms);
         let mut clicks = std::mem::take(&mut self.clicks);
-        clicks.extend(self.gestures.take_events().into_iter().filter_map(|gesture| match gesture {
-            GestureEvent::Click { position, .. } => Some(position),
-            _ => None,
-        }));
-        for position in clicks {
+        for gesture in self.gestures.take_events() {
+            if let GestureEvent::Click { position, button } = gesture {
+                if self.long_pressed > 0 {
+                    self.long_pressed -= 1;
+                } else if button == mln_gestures::Button::Secondary {
+                    clicks.push((position, Event::Contextmenu));
+                } else {
+                    clicks.push((position, Event::Click));
+                }
+            }
+        }
+        for (position, event) in clicks {
             if let Ok(lat_lng) = self.map.lat_lng_for_pixel(&position, WrapMode::Wrapped) {
-                self.click = Some(Click {
-                    lng_lat: [lat_lng.longitude(), lat_lng.latitude()],
-                    point: [position.x, position.y],
+                let click = Click {
+                    lng_lat: LngLat { lng: lat_lng.longitude(), lat: lat_lng.latitude() },
+                    point: Point { x: position.x, y: position.y },
                     features: self.features_at(position),
-                });
-                events.push(Event::Click);
+                };
+                match event {
+                    Event::Contextmenu => self.contextmenu = Some(click),
+                    _ => self.click = Some(click),
+                }
+                events.push(event);
             }
         }
         self.map_events(events);
@@ -603,7 +686,33 @@ impl Engine {
             layer_ids: Some(self.held.layers.iter().map(|layer| layer.id.clone()).collect()),
             filter: None,
         };
-        self.renderer.query_rendered_features(&geometry, &options).unwrap_or_default().iter().map(feature).collect()
+        let features = self.renderer.query_rendered_features(&geometry, &options).unwrap_or_default();
+        features
+            .iter()
+            .map(|found| {
+                let mut feature = feature(found);
+                if feature.properties.get("cluster") == Some(&Json::Bool(true)) {
+                    feature.cluster_expansion_zoom = self.cluster_expansion_zoom(found);
+                }
+                feature
+            })
+            .collect()
+    }
+
+    /// The zoom at which a cluster of a clustered GeoJSON source splits.
+    fn cluster_expansion_zoom(&self, cluster: &mln_util::feature::Feature) -> Option<f64> {
+        use mln_renderer::query::FeatureExtensionValue;
+        let value =
+            self.renderer.query_feature_extensions(&cluster.source, cluster, "supercluster", "expansion-zoom", None);
+        match value {
+            Ok(FeatureExtensionValue::Value(value)) => match value {
+                ::feature::Value::Uint(zoom) => Some(zoom as f64),
+                ::feature::Value::Int(zoom) => Some(zoom as f64),
+                ::feature::Value::Double(zoom) => Some(zoom),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     fn draw(&mut self) {
@@ -656,6 +765,7 @@ impl Engine {
             camera: self.rest,
             loaded: self.loaded && self.idle,
             click: self.click.clone(),
+            contextmenu: self.contextmenu.clone(),
             failure: self.error.clone(),
             attribution: self.attribution.clone(),
         }
@@ -681,6 +791,7 @@ fn feature(feature: &mln_util::feature::Feature) -> protocol::Feature {
         source: feature.source.clone(),
         source_layer: feature.source_layer.clone(),
         properties,
+        cluster_expansion_zoom: None,
     }
 }
 
@@ -708,6 +819,7 @@ fn everything(camera: &Camera) -> CameraChange {
         zoom: Some(camera.zoom),
         bearing: Some(camera.bearing),
         pitch: Some(camera.pitch),
+        padding: None,
     }
 }
 
@@ -717,6 +829,10 @@ fn camera_options(change: &CameraChange) -> CameraOptions {
         .with_zoom(change.zoom)
         .with_bearing(change.bearing)
         .with_pitch(change.pitch)
+        .with_padding(change.padding.and_then(|padding| {
+            let [top, left, bottom, right] = padding.edges();
+            EdgeInsets::new(top, left, bottom, right).ok()
+        }))
 }
 
 fn animation_options(duration_ms: Option<f64>) -> AnimationOptions {

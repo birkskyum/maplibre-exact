@@ -15,8 +15,9 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
 );
 
 // The map's own sources and layers, in the MapLibre Style Specification's
-// terms, and the callout's place over the chosen pin, which is 32 points tall.
-const content = (chosen: string) => ({
+// terms, the places clustered when zoomed out. The markers hold the callout
+// over the chosen pin, which is 32 points tall, and the dropped pin.
+const content = (chosen: string, dropped: number[]) => ({
   hitPadding: 8,
   images: {
     pin: { src: 'assets/pin.png', pixelRatio: 2 },
@@ -26,6 +27,9 @@ const content = (chosen: string) => ({
     walk: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: walk } } },
     places: {
       type: 'geojson',
+      cluster: true,
+      clusterRadius: 40,
+      clusterMaxZoom: 14,
       data: {
         type: 'FeatureCollection',
         features: places.map(({ id, name, coordinates }) => ({
@@ -46,9 +50,25 @@ const content = (chosen: string) => ({
       paint: { 'line-color': '#1f6feb', 'line-width': 5, 'line-opacity': 0.5 },
     },
     {
+      id: 'clusters',
+      type: 'circle',
+      source: 'places',
+      filter: ['has', 'point_count'],
+      paint: { 'circle-color': '#1f6feb', 'circle-radius': 16, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 },
+    },
+    {
+      id: 'cluster-count',
+      type: 'symbol',
+      source: 'places',
+      filter: ['has', 'point_count'],
+      layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 13 },
+      paint: { 'text-color': '#ffffff' },
+    },
+    {
       id: 'places',
       type: 'symbol',
       source: 'places',
+      filter: ['!', ['has', 'point_count']],
       layout: {
         'icon-image': ['case', ['==', ['get', 'id'], chosen], 'pin-selected', 'pin'],
         'icon-anchor': 'bottom',
@@ -63,11 +83,14 @@ const content = (chosen: string) => ({
       paint: { 'text-color': '#1c2024', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
     },
   ],
-  markers: Object.fromEntries(
-    places
-      .filter((place) => place.id === chosen)
-      .map((place) => ['callout', { lngLat: place.coordinates, anchor: 'bottom', offset: [0, -36] }]),
-  ),
+  markers: {
+    ...Object.fromEntries(
+      places
+        .filter((place) => place.id === chosen)
+        .map((place) => ['callout', { lngLat: place.coordinates, anchor: 'bottom', offset: [0, -36] }]),
+    ),
+    ...(dropped.length === 2 ? { dropped: { lngLat: dropped, anchor: 'bottom' } } : {}),
+  },
 });
 
 const fly = (chosen: string) => {
@@ -76,7 +99,10 @@ const fly = (chosen: string) => {
 };
 
 const sources: Sources = {
-  mapContent: ([chosen]): Result<'mapContent'> => ({ json: JSON.stringify(content(chosen)), fly: fly(chosen) }),
+  mapContent: ([chosen, dropped]): Result<'mapContent'> => ({
+    json: JSON.stringify(content(chosen, dropped)),
+    fly: fly(chosen),
+  }),
 };
 export const answer: Answer = (source, args, store, storage, native) =>
   sources[source](args, store, storage, native);

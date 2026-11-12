@@ -11,7 +11,7 @@
 //! `postMessage(text, "maplibre")`. The map posts the names of the events
 //! ([`Event`]) the `events` argument lists to the canvas's `message=` action,
 //! as GL JS's `map.on` subscribes to them, and keeps its camera, the last
-//! click and the last error in its record ([`Record`]), which the app reads
+//! click and context menu and the last error in its record ([`Record`]), which the app reads
 //! with `exactSurface("maplibre")` as a shape of its own. The names
 //! follow MapLibre GL JS and the MapLibre Style Specification.
 
@@ -384,6 +384,43 @@ pub struct CameraChange {
     pub zoom: Option<f64>,
     pub bearing: Option<f64>,
     pub pitch: Option<f64>,
+    /// Points of the canvas's edges that the camera's center keeps clear of,
+    /// such as under a panel over the map. It stays until a command changes it.
+    pub padding: Option<Padding>,
+}
+
+/// GL JS's `PaddingOptions`: one number for every edge, or each edge's own.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Padding {
+    All(f64),
+    Edges {
+        #[serde(default)]
+        top: f64,
+        #[serde(default)]
+        bottom: f64,
+        #[serde(default)]
+        left: f64,
+        #[serde(default)]
+        right: f64,
+    },
+}
+
+impl Default for Padding {
+    fn default() -> Padding {
+        Padding::All(0.0)
+    }
+}
+
+impl Padding {
+    /// Top, left, bottom and right.
+    #[must_use]
+    pub fn edges(self) -> [f64; 4] {
+        match self {
+            Padding::All(n) => [n; 4],
+            Padding::Edges { top, bottom, left, right } => [top, left, bottom, right],
+        }
+    }
 }
 
 /// A camera change that animates.
@@ -406,7 +443,7 @@ pub enum Command {
     /// points in from the canvas's edges, animated unless `duration` is 0.
     FitBounds {
         bounds: [[f64; 2]; 2],
-        padding: Option<f64>,
+        padding: Option<Padding>,
         duration: Option<f64>,
     },
     SetStyle {
@@ -435,12 +472,15 @@ pub enum Event {
     /// A press and release that didn't move the map, which the record's
     /// `click` describes.
     Click,
+    /// A secondary click, or a touch held still, which the record's
+    /// `contextmenu` describes, as in a browser.
+    Contextmenu,
     /// Something failed, which the record's `failure` says.
     Error,
 }
 
 impl Event {
-    const ALL: [Event; 4] = [Event::Load, Event::Moveend, Event::Click, Event::Error];
+    const ALL: [Event; 5] = [Event::Load, Event::Moveend, Event::Click, Event::Contextmenu, Event::Error];
 
     /// The events named in `text`, separated by spaces or commas.
     ///
@@ -452,7 +492,7 @@ impl Event {
             .filter(|word| !word.is_empty())
             .map(|word| {
                 Event::ALL.into_iter().find(|event| event.name() == word).ok_or_else(|| {
-                    format!("maplibre: events: {word} is no event; the map posts load, moveend, click and error")
+                    format!("maplibre: events: {word} is no event; the map posts load, moveend, click, contextmenu and error")
                 })
             })
             .collect()
@@ -465,6 +505,7 @@ impl Event {
             Event::Load => "load",
             Event::Moveend => "moveend",
             Event::Click => "click",
+            Event::Contextmenu => "contextmenu",
             Event::Error => "error",
         }
     }
@@ -480,6 +521,8 @@ pub struct Record {
     pub loaded: bool,
     /// The last click, `null` before the first.
     pub click: Option<Click>,
+    /// The last secondary click or long press, `null` before the first.
+    pub contextmenu: Option<Click>,
     /// The last error, `null` while there has been none. It isn't called
     /// `error` because Exact keeps a canvas's own `error` beside its record.
     pub failure: Option<String>,
@@ -531,15 +574,29 @@ pub fn attribution_text<'a>(html: impl IntoIterator<Item = &'a str>) -> String {
     texts.join(" | ")
 }
 
-/// A click on the map.
+/// A click on the map, as GL JS's `MapMouseEvent` has it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Click {
     #[serde(rename = "lngLat")]
-    pub lng_lat: [f64; 2],
+    pub lng_lat: LngLat,
     /// Points from the canvas's top-left corner.
-    pub point: [f64; 2],
+    pub point: Point,
     /// The features of the content's layers at the click, topmost first.
     pub features: Vec<Feature>,
+}
+
+/// A place, as GL JS's `LngLat` writes it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct LngLat {
+    pub lng: f64,
+    pub lat: f64,
+}
+
+/// A point on the canvas, as GL JS's `Point` writes it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// A feature a layer drew, as GL JS's `queryRenderedFeatures` returns it,
@@ -553,6 +610,11 @@ pub struct Feature {
     #[serde(rename = "sourceLayer")]
     pub source_layer: String,
     pub properties: Map<String, Json>,
+    /// For a cluster of a clustered GeoJSON source, the zoom at which it
+    /// splits, as GL JS's `getClusterExpansionZoom` answers; `null` for any
+    /// other feature.
+    #[serde(rename = "clusterExpansionZoom")]
+    pub cluster_expansion_zoom: Option<f64>,
 }
 
 #[cfg(test)]
@@ -598,7 +660,11 @@ mod tests {
     fn a_fit_bounds_takes_two_corners() {
         assert_eq!(
             Command::parse(r#"{"command":"fitBounds","bounds":[[8.5,47.3],[8.6,47.4]],"padding":20}"#),
-            Ok(Command::FitBounds { bounds: [[8.5, 47.3], [8.6, 47.4]], padding: Some(20.0), duration: None })
+            Ok(Command::FitBounds {
+                bounds: [[8.5, 47.3], [8.6, 47.4]],
+                padding: Some(Padding::All(20.0)),
+                duration: None
+            })
         );
     }
 
@@ -684,13 +750,30 @@ mod tests {
             camera: Camera { center: [1.0, 2.0], zoom: 3.0, bearing: 0.0, pitch: 0.0 },
             loaded: true,
             click: None,
+            contextmenu: None,
             failure: None,
             attribution: String::new(),
         };
         assert_eq!(
             record.to_json(),
-            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"failure":null,"attribution":""}"#
+            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"contextmenu":null,"failure":null,"attribution":""}"#
         );
+    }
+
+    #[test]
+    fn padding_is_one_number_or_each_edge() {
+        let Ok(Command::EaseTo(animation)) =
+            Command::parse(r#"{"command":"easeTo","center":[8.5,47.4],"padding":{"bottom":240,"left":12}}"#)
+        else {
+            panic!("an easeTo with padding");
+        };
+        assert_eq!(animation.camera.padding.map(Padding::edges), Some([0.0, 12.0, 240.0, 0.0]));
+        let Ok(Command::FitBounds { padding, .. }) =
+            Command::parse(r#"{"command":"fitBounds","bounds":[[8.5,47.3],[8.6,47.4]],"padding":40}"#)
+        else {
+            panic!("a fitBounds with padding");
+        };
+        assert_eq!(padding.map(Padding::edges), Some([40.0; 4]));
     }
 
     #[test]
