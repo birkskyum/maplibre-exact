@@ -272,6 +272,9 @@ pub struct Record {
     pub click: Option<Click>,
     /// The last error, `null` while there has been none.
     pub error: Option<String>,
+    /// Who the style's data comes from, as text to show on or beside the
+    /// map, the sources' attributions joined with ` | `.
+    pub attribution: String,
 }
 
 impl Record {
@@ -279,6 +282,34 @@ impl Record {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
+}
+
+/// The text of sources' attributions, which styles write in HTML: tags taken
+/// out, the usual entities decoded, each attribution once, joined as GL JS's
+/// attribution control joins them.
+#[must_use]
+pub fn attribution_text<'a>(html: impl IntoIterator<Item = &'a str>) -> String {
+    let mut texts: Vec<String> = Vec::new();
+    for html in html {
+        let mut text = String::new();
+        let mut in_tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                c if !in_tag => text.push(c),
+                _ => {}
+            }
+        }
+        for (entity, c) in [("&copy;", "©"), ("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&")] {
+            text = text.replace(entity, c);
+        }
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !text.is_empty() && !texts.contains(&text) {
+            texts.push(text);
+        }
+    }
+    texts.join(" | ")
 }
 
 /// A click on the map.
@@ -369,10 +400,20 @@ mod tests {
             loaded: true,
             click: None,
             error: None,
+            attribution: String::new(),
         };
         assert_eq!(
             record.to_json(),
-            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"error":null}"#
+            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"error":null,"attribution":""}"#
+        );
+    }
+
+    #[test]
+    fn attributions_become_one_line_of_text() {
+        let openfreemap = r#"<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>"#;
+        assert_eq!(
+            attribution_text([openfreemap, openfreemap, "Mapterhorn"]),
+            "OpenFreeMap © OpenMapTiles Data from OpenStreetMap | Mapterhorn"
         );
     }
 }

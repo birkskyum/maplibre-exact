@@ -77,7 +77,7 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
 | Feature queries and feature state | Not yet |
 | Images and icons | Not yet |
-| Controls, the compass, scale bar and attribution | Not yet; attribution is needed before anything ships |
+| Controls, the compass, scale bar and attribution | The record's `attribution`, which the app shows over the map; no compass or scale bar |
 | Terrain and hillshade | Up to the style; untested on mln-rs |
 | Location, offline, requests, snapshotter | Not yet |
 

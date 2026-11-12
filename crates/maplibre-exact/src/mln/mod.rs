@@ -88,6 +88,7 @@ struct Engine {
     animating: bool,
     click: Option<Click>,
     error: Option<String>,
+    attribution: String,
     size: Size,
     pixel_ratio: f32,
     /// The map's clock at a host millisecond.
@@ -252,6 +253,7 @@ impl Engine {
             animating: false,
             click: None,
             error: None,
+            attribution: String::new(),
             size,
             pixel_ratio: frame.scale,
             epoch: (Clock::now(), frame.now_ms),
@@ -354,9 +356,12 @@ impl Engine {
                     self.style_loaded = true;
                     self.held = Content::default();
                     self.content_changed = true;
+                    self.attribution = self.attribution();
                 }
                 MapEvent::Idle => {
                     self.idle = true;
+                    // A tiled source knows its attribution once its TileJSON has loaded.
+                    self.attribution = self.attribution();
                     if !self.loaded {
                         self.loaded = true;
                         events.push(Event::Load);
@@ -439,6 +444,12 @@ impl Engine {
         self.target.resize(Size::new(width, height));
     }
 
+    fn attribution(&self) -> String {
+        let sources = self.map.style().get_sources();
+        let html: Vec<String> = sources.iter().filter_map(|source| source.get_attribution()).collect();
+        protocol::attribution_text(html.iter().map(String::as_str))
+    }
+
     /// The map's clock at a host millisecond.
     fn map_time(&self, at_ms: f64) -> TimePoint {
         self.epoch.0 + Duration::from_nanos(((at_ms - self.epoch.1) * 1e6) as i64)
@@ -463,6 +474,7 @@ impl Engine {
             loaded: self.loaded && self.idle,
             click: self.click.clone(),
             error: self.error.clone(),
+            attribution: self.attribution.clone(),
         }
     }
 }

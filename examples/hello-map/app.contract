@@ -19,6 +19,7 @@ shape MapRecord
   zoom: number
   loaded: bool
   click: option<MapClick>
+  attribution: string
 
 routes nav
   home "/"
@@ -36,5 +37,6 @@ component HelloMap
           header display="flex" align-items="center"
             text "Hello Map" role="heading" aria-level=1 flex=1
             button "Zürich" press=zurich testId="zurich"
-          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json) flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+          canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", longitude=10.45, latitude=51.16, zoom=4, bearing=0, pitch=0, content=content.json) position="relative" flex=1 min-height=0 width="100%" touch-action="none" aria-label="Map" testId="map"
+            text map.attribution position="absolute" right=0 bottom=0 font-size=11 padding="2px 6px" color="#333333" background-color="#ffffffcc" testId="attribution"
           text (chosen.id == "" ? "Tap a place" : chosen.name) padding=8 testId="chosen"

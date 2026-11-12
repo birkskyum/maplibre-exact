@@ -22,7 +22,8 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
   changed paint and layout properties in place and the rest by adding and removing layers and sources.
 - The map posts `load`, `moveend`, `click` and `error` to the canvas's `message=` action.
 - Its record, `exactSurface("maplibre")`, holds the camera at rest, whether everything in view has
-  loaded, the last click with the content's features under it, and the last error. The app reads it as
+  loaded, the last click with the content's features under it, the last error, and the style's
+  attribution as text for the app to show on the map. The app reads it as
   a shape of its own.
 - Commands go in as JSON, such as
   ``postMessage(`{"command":"flyTo","center":[8.54,47.37],"zoom":14}`, "maplibre")``.
