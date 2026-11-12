@@ -1,0 +1,20 @@
+[package]
+name = "hello-map-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "hello-map-linux"
+path = "src/main.rs"
+
+[dependencies]
+ibex2-sqlite = { path = "../../../../exact/vendor/ibex/crates/ibex2-sqlite" }
+exact-logic = { path = "../../../../exact/logic" }
+exact-linux = { path = "../../../../exact/host/linux" }
+exact-js = { path = "../../../../exact/js" }
+
+[build-dependencies]
+exact-js-bake = { path = "../../../../exact/js/bake" }

@@ -2,7 +2,7 @@
 # when the manifest's platforms or the checkout change. An app that needs Rust of its own copies this workspace up
 # beside app.json and adds its crates there (`bun exact.mjs contract vocab gpu-module`); that one is used instead.
 [workspace]
-members = ["web", "apple", "gpu"]
+members = ["android", "apple", "gpu", "linux", "web"]
 resolver = "2"
 
 [workspace.package]

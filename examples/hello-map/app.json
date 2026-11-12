@@ -24,7 +24,8 @@
         "iphone",
         "ipad"
       ]
-    }
+    },
+    "android": {}
   },
   "deploy": {
     "store": {
@@ -32,5 +33,13 @@
       "macos": "0",
       "ios": "0"
     }
-  }
+  },
+  "icons": [
+    {
+      "src": "assets/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }

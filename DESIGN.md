@@ -2,8 +2,8 @@
 
 ## One contract, any engine
 
-An app sees a canvas surface named `maplibre` with eight named arguments, JSON commands in, event
-names out to `message=`, and a record it reads as `exactSurface("maplibre")`
+An app sees a canvas surface named `maplibre` with nine named arguments, JSON commands in, the names
+of the events it listens for out to `message=`, and a record it reads as `exactSurface("maplibre")`
 ([`protocol.rs`](crates/maplibre-exact/src/protocol.rs)). Nothing in it names mln-rs, so an app keeps
 its Contract and data module when the engine under it changes. A camera argument moves the map only
 when its value changes, so the person can pan freely and the app moves the map again by changing the
@@ -94,14 +94,26 @@ Found while building the prototype on exact2 `85c1b9c5`.
 2. **Rust 1.97.0 is pinned and enforced.** The build refuses an app whose toolchain differs from the
    checkout's. mln-rs and its `mlt-core` dependency need 1.98, so the prototype moves its Exact
    checkout to 1.99.1 ([`patches/exact`](patches/exact)).
-3. **Exact version pins in vendored crates.** `hermes-lean-sys` requires `ureq = "=3.4.0"`, which
-   conflicts with mln-rs's `^3.5.1` even on Apple platforms, where mln-rs never compiles ureq. The
-   web build's wasm-bindgen CLI is 0.2.127 and refuses the 0.2.130 mln-rs pins.
+3. **Exact version pins in vendored crates.** `hermes-lean-sys`, `ibex2` and the Hermes installer
+   require `ureq = "=3.4.0"`, because `ibex2` uses ureq's `unversioned` transport API, which changes
+   between minor versions. mln-rs needs `^3.5.1`, which Cargo resolves even on Apple platforms, where
+   mln-rs never compiles ureq. With the pins relaxed, `ibex2` needs one line for ureq 3.5
+   (`NextTimeout` gained two fields), in [`patches/exact`](patches/exact). The web build's
+   wasm-bindgen CLI is 0.2.127 and refuses the 0.2.130 mln-rs pins.
 4. **No modifier keys on pointer and wheel events, and no platform pinch.** Shift-drag to box-zoom,
    Ctrl-drag to rotate and a trackpad's magnify and rotate can't be recognized. Two-finger touch
    pinch works.
 5. **`exact lock` resolves offline first and fails rather than fetching** when a new dependency needs
    a version the offline index lacks (`objc2` 0.6.5 here). A plain `cargo metadata` fetched it.
+6. **An Android build of an app with no icons fails** writing `icons/res.key` into a folder it never
+   made. The example declares an icon.
+7. **A message to a canvas with no `message=` action** is ignored on Apple and refused on Android
+   (`NoHandler`). The map posts only the events the app lists, so an app without the action works on
+   both.
+8. **A surface's record shares the agent's view of a canvas with the host's own fields**, so a record
+   field named `error` reads as a refused canvas and stops a drive. The record says `failure`.
+9. **An app's own workspace isn't given a new platform's crate** by the native verb, only by
+   `exact update`, which a GPU module's app has to know to run.
 
 ## What mln-rs would need
 
@@ -114,15 +126,16 @@ Found while building the prototype on exact2 `85c1b9c5`.
 
 ## Where it runs
 
-- macOS, and iOS on an iPhone 17 Pro (iOS 27.2), from the same build of the surface. On the phone the
-  map took 1.5 ms of GPU time a frame while panning.
+- macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface. On the
+  iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with wgpu's Vulkan
+  backend, and mln-rs fetches over its ureq transport there, where Apple uses NSURLSession.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact
   uses one that is installed and doesn't create it, so the first time it is made with Xcode's
   automatic signing (`xcodebuild -allowProvisioningUpdates` on any app target with the bundle id).
 
 ## Not done yet
 
-- The web, Linux and Windows builds. The web is blocked on the wasm-bindgen pin and on mln-rs's
+- The web, Linux and Windows builds, and the map itself on Android, which so far ran offline. The web is blocked on the wasm-bindgen pin and on mln-rs's
   worker model.
 - The rest of the table above.
 - Markers drawn by the app's Contract. Exact lays a canvas's children out over it and lets the surface

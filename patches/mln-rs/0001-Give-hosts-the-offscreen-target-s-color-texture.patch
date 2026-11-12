@@ -1,7 +1,7 @@
 From 2980cf2b73d595152b23eb9de27c938a6df1ed8f Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 13:33:47 +0100
-Subject: [PATCH 1/2] Give hosts the offscreen target's color texture
+Subject: [PATCH] Give hosts the offscreen target's color texture
 
 ---
  crates/mln_webgpu/src/offscreen_target.rs  | 10 ++++++++++

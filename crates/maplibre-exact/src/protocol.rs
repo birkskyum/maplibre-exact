@@ -8,10 +8,11 @@
 //! map again by changing the value.
 //!
 //! The app sends commands ([`Command`]) as JSON texts with
-//! `postMessage(text, "maplibre")`. The map posts the name of each event
-//! ([`Event`]) to the canvas's `message=` action, and keeps its camera, the
-//! last click and the last error in its record ([`Record`]), which the app
-//! reads with `exactSurface("maplibre")` as a shape of its own. The names
+//! `postMessage(text, "maplibre")`. The map posts the names of the events
+//! ([`Event`]) the `events` argument lists to the canvas's `message=` action,
+//! as GL JS's `map.on` subscribes to them, and keeps its camera, the last
+//! click and the last error in its record ([`Record`]), which the app reads
+//! with `exactSurface("maplibre")` as a shape of its own. The names
 //! follow MapLibre GL JS and the MapLibre Style Specification.
 
 use exact_gpu::Value;
@@ -19,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as Json};
 
 /// The surface's arguments in bind order.
-pub const ARGUMENTS: [&str; 8] = ["style", "longitude", "latitude", "zoom", "bearing", "pitch", "content", "options"];
+pub const ARGUMENTS: [&str; 9] =
+    ["style", "longitude", "latitude", "zoom", "bearing", "pitch", "content", "options", "events"];
 
 /// How many arguments the surface binds.
 pub const ARITY: usize = ARGUMENTS.len();
@@ -37,6 +39,7 @@ pub fn argument_defaults() -> Vec<(&'static str, Value)> {
         ("pitch", Value::Number(0.0)),
         ("content", Value::from("")),
         ("options", Value::from("")),
+        ("events", Value::from("")),
     ]
 }
 
@@ -48,6 +51,8 @@ pub struct Inputs {
     pub camera: Camera,
     pub content: Content,
     pub options: Options,
+    /// The events posted to the canvas's `message=` action.
+    pub events: Vec<Event>,
 }
 
 impl Inputs {
@@ -58,7 +63,7 @@ impl Inputs {
     /// The message names the argument that is missing, of the wrong type or
     /// malformed.
     pub fn from_values(values: &[Value]) -> Result<Inputs, String> {
-        let [style, longitude, latitude, zoom, bearing, pitch, content, options] = values else {
+        let [style, longitude, latitude, zoom, bearing, pitch, content, options, events] = values else {
             return Err(format!("maplibre: expected {ARITY} arguments, got {}", values.len()));
         };
         let number = |value: &Value, name: &str| {
@@ -81,6 +86,7 @@ impl Inputs {
             },
             content: Content::parse(content.as_str().ok_or("maplibre: content must be text")?)?,
             options: Options::parse(options.as_str().ok_or("maplibre: options must be text")?)?,
+            events: Event::parse_list(events.as_str().ok_or("maplibre: events must be text")?)?,
         })
     }
 
@@ -348,11 +354,29 @@ pub enum Event {
     /// A press and release that didn't move the map, which the record's
     /// `click` describes.
     Click,
-    /// Something failed, which the record's `error` says.
+    /// Something failed, which the record's `failure` says.
     Error,
 }
 
 impl Event {
+    const ALL: [Event; 4] = [Event::Load, Event::Moveend, Event::Click, Event::Error];
+
+    /// The events named in `text`, separated by spaces or commas.
+    ///
+    /// # Errors
+    ///
+    /// The message names a word that is no event.
+    pub fn parse_list(text: &str) -> Result<Vec<Event>, String> {
+        text.split([' ', ','])
+            .filter(|word| !word.is_empty())
+            .map(|word| {
+                Event::ALL.into_iter().find(|event| event.name() == word).ok_or_else(|| {
+                    format!("maplibre: events: {word} is no event; the map posts load, moveend, click and error")
+                })
+            })
+            .collect()
+    }
+
     /// The text the app receives.
     #[must_use]
     pub fn name(self) -> &'static str {
@@ -375,8 +399,9 @@ pub struct Record {
     pub loaded: bool,
     /// The last click, `null` before the first.
     pub click: Option<Click>,
-    /// The last error, `null` while there has been none.
-    pub error: Option<String>,
+    /// The last error, `null` while there has been none. It isn't called
+    /// `error` because Exact keeps a canvas's own `error` beside its record.
+    pub failure: Option<String>,
     /// Who the style's data comes from, as text to show on or beside the
     /// map, the sources' attributions joined with ` | `.
     pub attribution: String,
@@ -489,6 +514,13 @@ mod tests {
     }
 
     #[test]
+    fn events_are_names_the_app_listens_for() {
+        assert_eq!(Event::parse_list("click moveend"), Ok(vec![Event::Click, Event::Moveend]));
+        assert_eq!(Event::parse_list(""), Ok(vec![]));
+        assert!(Event::parse_list("hover").is_err());
+    }
+
+    #[test]
     fn an_unknown_command_is_refused() {
         assert!(Command::parse(r#"{"command":"spin"}"#).is_err());
     }
@@ -536,17 +568,17 @@ mod tests {
     }
 
     #[test]
-    fn the_record_has_null_for_no_click_and_no_error() {
+    fn the_record_has_null_for_no_click_and_no_failure() {
         let record = Record {
             camera: Camera { center: [1.0, 2.0], zoom: 3.0, bearing: 0.0, pitch: 0.0 },
             loaded: true,
             click: None,
-            error: None,
+            failure: None,
             attribution: String::new(),
         };
         assert_eq!(
             record.to_json(),
-            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"error":null,"attribution":""}"#
+            r#"{"center":[1.0,2.0],"zoom":3.0,"bearing":0.0,"pitch":0.0,"loaded":true,"click":null,"failure":null,"attribution":""}"#
         );
     }
 

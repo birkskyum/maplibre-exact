@@ -1,0 +1,21 @@
+[package]
+name = "hello-map-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+bench = false
+
+[target.'cfg(target_os = "android")'.dependencies]
+ibex2-sqlite = { path = "../../../../exact/vendor/ibex/crates/ibex2-sqlite" }
+exact-logic = { path = "../../../../exact/logic" }
+exact-linux = { path = "../../../../exact/host/linux" }
+exact-js = { path = "../../../../exact/js" }
+
+[build-dependencies]
+exact-js-bake = { path = "../../../../exact/js/bake" }

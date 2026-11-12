@@ -97,11 +97,22 @@ struct Engine {
     animating: bool,
     click: Option<Click>,
     error: Option<String>,
+    /// The last failure that refuses the canvas, until the surface reports it.
+    refusal: Option<String>,
     attribution: String,
     size: Size,
     pixel_ratio: f32,
     /// The map's clock at a host millisecond.
     epoch: (TimePoint, f64),
+}
+
+impl MapSurface {
+    /// Posts `event` to the canvas's `message=` action if the app listens for it.
+    fn post(&mut self, event: Event) {
+        if self.inputs.as_ref().is_some_and(|inputs| inputs.events.contains(&event)) {
+            self.events.push(event.name().to_owned());
+        }
+    }
 }
 
 impl Surface for MapSurface {
@@ -128,7 +139,7 @@ impl Surface for MapSurface {
             match Engine::new(frame, device, queue, inputs.clone()) {
                 Ok(engine) => self.engine = Some(engine),
                 Err(message) => {
-                    self.events.push(Event::Error.name().to_owned());
+                    self.post(Event::Error);
                     self.error = Some(SurfaceError(message));
                     return false;
                 }
@@ -144,11 +155,13 @@ impl Surface for MapSurface {
         if let Some(texture) = engine.target.color_texture() {
             engine.blit.draw(device, encoder, target, format, &texture);
         }
-        if events.contains(&Event::Error) {
-            self.error = engine.error.clone().map(SurfaceError);
+        if let Some(refusal) = engine.refusal.take() {
+            self.error = Some(SurfaceError(refusal));
         }
         self.record = Some(engine.record());
-        self.events.extend(events.iter().map(|event| event.name().to_owned()));
+        for event in events {
+            self.post(event);
+        }
         wants_frame
     }
 
@@ -175,7 +188,7 @@ impl Surface for MapSurface {
                 Some(name) => requests.push(name),
                 None => {
                     let message = format!("maplibre: image {src} must be a path under assets/");
-                    self.events.push(Event::Error.name().to_owned());
+                    self.post(Event::Error);
                     self.error = Some(SurfaceError(message));
                 }
             }
@@ -203,7 +216,7 @@ impl Surface for MapSurface {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.error = Some(message.clone());
                 }
-                self.events.push(Event::Error.name().to_owned());
+                self.post(Event::Error);
                 self.error = Some(SurfaceError(message));
             }
         }
@@ -237,7 +250,7 @@ impl Surface for MapSurface {
                     if let Some(engine) = self.engine.as_mut() {
                         engine.error = Some(message.clone());
                     }
-                    self.events.push(Event::Error.name().to_owned());
+                    self.post(Event::Error);
                     self.error = Some(SurfaceError(message));
                 }
             }
@@ -323,6 +336,7 @@ impl Engine {
             animating: false,
             click: None,
             error: None,
+            refusal: None,
             attribution: String::new(),
             size,
             pixel_ratio: frame.scale,
@@ -513,7 +527,12 @@ impl Engine {
                     }
                 }
                 MapEvent::LoadingStarted => self.idle = false,
-                MapEvent::LoadingFailed(error) => self.fail(format!("maplibre: {error:?}"), events),
+                // A style that fails to load is the network's or the server's
+                // doing, so the app hears of it and the canvas isn't refused.
+                MapEvent::LoadingFailed(error) => {
+                    self.error = Some(format!("maplibre: {error:?}"));
+                    events.push(Event::Error);
+                }
                 MapEvent::RenderError(error) => self.fail(format!("maplibre: {}", error.message), events),
                 _ => {}
             }
@@ -533,8 +552,11 @@ impl Engine {
         self.idle = false;
     }
 
+    /// Reports a failure that is the app's or the engine's, which also refuses
+    /// the canvas so that Exact reports it.
     fn fail(&mut self, message: String, events: &mut Vec<Event>) {
-        self.error = Some(message);
+        self.error = Some(message.clone());
+        self.refusal = Some(message);
         events.push(Event::Error);
     }
 
@@ -618,7 +640,7 @@ impl Engine {
             camera: self.rest,
             loaded: self.loaded && self.idle,
             click: self.click.clone(),
-            error: self.error.clone(),
+            failure: self.error.clone(),
             attribution: self.attribution.clone(),
         }
     }

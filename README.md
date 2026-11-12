@@ -24,9 +24,10 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
 - `options` limits the camera and turns gestures off, with GL JS's `MapOptions` names (`minZoom`,
   `maxZoom`, `minPitch`, `maxPitch`, `maxBounds`, `interactive`, `dragRotate`, `pitchWithRotate`,
   `touchPitch`, `scrollZoom`).
-- The map posts `load`, `moveend`, `click` and `error` to the canvas's `message=` action.
+- The map posts the events `events` lists (`load`, `moveend`, `click`, `error`) to the canvas's
+  `message=` action, as GL JS's `map.on` subscribes to them.
 - Its record, `exactSurface("maplibre")`, holds the camera at rest, whether everything in view has
-  loaded, the last click with the content's features under it, the last error, and the style's
+  loaded, the last click with the content's features under it, the last failure, and the style's
   attribution as text for the app to show on the map. The app reads it as
   a shape of its own.
 - Commands go in as JSON, such as
@@ -56,10 +57,10 @@ The crate and the example find Exact and mln-rs by path, as checkouts next to th
 
 ## Running the example
 
-Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches), two
-small changes to mln-rs (the offscreen frame as a texture, and a `ureq` requirement Exact can meet), and
-Rust 1.99.1 for Exact, whose 1.97 is older than mln-rs supports. They apply to Exact `85c1b9c5` and
-mln-rs `c558503`, the commits this was built on.
+Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches). mln-rs
+gets one, which gives a host the offscreen frame as a texture. Exact gets three, which build it with Rust
+1.99.1, as mln-rs needs, let its crates take ureq 3.5, as mln-rs does, and adapt `ibex2` to ureq 3.5.
+They apply to Exact `85c1b9c5` and mln-rs `c558503`, the commits this was built on.
 
 ```sh
 git clone https://github.com/expo/exact && git -C exact am ../maplibre-exact/patches/exact/*.patch
@@ -72,4 +73,5 @@ Then, from `maplibre-exact/examples/hello-map`:
 ```sh
 bun exact.mjs mac --run
 bun exact.mjs ios --device --run   # on a connected iPhone, with a development profile for its bundle id
+bun exact.mjs android --run        # on a connected Android phone
 ```
