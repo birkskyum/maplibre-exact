@@ -127,7 +127,7 @@ impl Surface for MapSurface {
         let Some(engine) = self.engine.as_mut() else { return false };
         engine.apply_inputs(&inputs);
         for command in std::mem::take(&mut self.pending) {
-            engine.command(command);
+            engine.command(command, frame.now_ms);
         }
         let mut events = Vec::new();
         let wants_frame = engine.frame(frame, &mut events);
@@ -160,10 +160,10 @@ impl Surface for MapSurface {
 
     fn input(&mut self, event: &InputEvent) {
         self.input_changed = false;
-        if let InputEvent::Message { text, .. } = event {
+        if let InputEvent::Message { text, at_ms } = event {
             match Command::parse(text) {
                 Ok(command) => match self.engine.as_mut() {
-                    Some(engine) => engine.command(command),
+                    Some(engine) => engine.command(command, *at_ms),
                     None => self.pending.push(command),
                 },
                 Err(message) => {
@@ -285,7 +285,10 @@ impl Engine {
         self.applied = inputs.clone();
     }
 
-    fn command(&mut self, command: Command) {
+    /// Runs `command`, posted at `at_ms` on the host's clock, where an
+    /// animation it starts begins.
+    fn command(&mut self, command: Command, at_ms: f64) {
+        self.map.set_frame_time(Some(self.map_time(at_ms)));
         match command {
             Command::JumpTo(change) => self.map.jump_to(&camera_options(&change)),
             Command::EaseTo(animation) => {
@@ -311,8 +314,7 @@ impl Engine {
             let start = std::time::Instant::now();
             while run_loop.run_once() && start.elapsed() < LOOP_BUDGET {}
         });
-        let elapsed = Duration::from_nanos(((frame.now_ms - self.epoch.1) * 1e6) as i64);
-        self.map.set_frame_time(Some(self.epoch.0 + elapsed));
+        self.map.set_frame_time(Some(self.map_time(frame.now_ms)));
         self.animating = self.gestures.frame(&mut self.map, frame.now_ms);
         for gesture in self.gestures.take_events() {
             if let GestureEvent::Click { position, .. } = gesture
@@ -435,6 +437,11 @@ impl Engine {
         }
         let (width, height) = frame.pixels();
         self.target.resize(Size::new(width, height));
+    }
+
+    /// The map's clock at a host millisecond.
+    fn map_time(&self, at_ms: f64) -> TimePoint {
+        self.epoch.0 + Duration::from_nanos(((at_ms - self.epoch.1) * 1e6) as i64)
     }
 
     fn camera(&self) -> Camera {
