@@ -84,6 +84,7 @@ bun exact/scripts/exact.mjs setup
 Then, from `maplibre-exact/examples/hello-map`:
 
 ```sh
+bun install --frozen-lockfile      # Exact's geolocation module, which the example uses
 bun exact.mjs mac --run
 bun exact.mjs ios --device --run   # on a connected iPhone, with a development profile for its bundle id
 bun exact.mjs android --run        # on a connected Android phone
