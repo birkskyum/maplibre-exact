@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 14:55:09 +0100
-Subject: [PATCH 3/3] Build ibex2 against ureq 3.5's NextTimeout
+Subject: [PATCH 3/4] Build ibex2 against ureq 3.5's NextTimeout
 
 ---
  vendor/ibex/crates/ibex2/src/transport/rustls_http.rs          | 1 +

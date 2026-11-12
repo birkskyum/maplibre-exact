@@ -153,6 +153,13 @@ Found while building the prototype on exact2 `85c1b9c5`, which it has since move
    field named `error` reads as a refused canvas and stops a drive. The record says `failure`.
 9. **An app's own workspace isn't given a new platform's crate** by the native verb, only by
    `exact update`, which a GPU module's app has to know to run.
+10. **iOS hands a surface the wrong pixels for its children one by one** (`ChildrenMode::Each`).
+    The GPU capture (`Shadow`) reads its target back before `CARenderer` has drawn the child, so
+    each child gets what the last capture of its size left there, or nothing in a new target: the
+    compass showed the locate button's arrow, and the callout was blank. It shows on an iPhone 17
+    Pro (iOS 27.2) and the iOS 26.5 simulator, and `EXACT_CAPTURE=cpu` cures it. The prototype
+    captures each child on the CPU ([`patches/exact`](patches/exact)), which costs little for
+    children the size of markers.
 
 ## What mln-rs would need
 
@@ -173,7 +180,9 @@ Found while building the prototype on exact2 `85c1b9c5`, which it has since move
 - macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
   attribution. The callout marker and its button, clusters zooming in, camera padding and a
-  right-click on macOS, and the callout and a long press on Android. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
+  right-click on macOS, and the callout, the compass and a long press on Android and on the
+  iPhone (the compass turning there on the iOS 26.5 simulator, since the phone's Metal HUD sits
+  over it). The globe, the relief and the located dot on macOS and Android. On the iPhone the map took 1.5 ms of GPU time a frame while panning. Android draws with
   wgpu's Vulkan backend, and mln-rs fetches over its ureq transport there, where Apple uses
   NSURLSession.
 - A phone build needs a development profile for the app's bundle id that includes the phone. Exact

@@ -68,8 +68,9 @@ The crate and the example find Exact and mln-rs by path, as checkouts next to th
 
 Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches). mln-rs
 gets two, which give a host the offscreen frame as a texture and trust Android's system certificates
-without Java. Exact gets three, which build it with Rust
-1.99.1, as mln-rs needs, let its crates take ureq 3.5, as mln-rs does, and adapt `ibex2` to ureq 3.5.
+without Java. Exact gets four, which build it with Rust 1.99.1, as mln-rs needs, let its crates take
+ureq 3.5, as mln-rs does, adapt `ibex2` to ureq 3.5, and capture a canvas's children correctly on
+iOS, which markers need.
 Both projects change every day, so check out the commits this was last built on, Exact `b5ad88a1`
 and mln-rs `b2d0bcc`, before applying them.
 

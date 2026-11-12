@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Thu, 12 Nov 2026 14:52:16 +0100
-Subject: [PATCH 2/3] Let Exact's crates take any ureq 3.4 or later
+Subject: [PATCH 2/4] Let Exact's crates take any ureq 3.4 or later
 
 ---
  apps/harness/data/Cargo.toml                            | 2 +-

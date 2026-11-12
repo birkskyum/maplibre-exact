@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Thu, 12 Nov 2026 21:11:27 +0100
+Subject: [PATCH 4/4] Capture a canvas's children one by one on the CPU on iOS
+
+---
+ host/apple/Sources/ExactKit/IOS/CaptureIOS.swift | 7 ++++---
+ host/apple/Sources/ExactSurfaces/GpuIOS.swift    | 5 ++++-
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/host/apple/Sources/ExactKit/IOS/CaptureIOS.swift b/host/apple/Sources/ExactKit/IOS/CaptureIOS.swift
+index ac737811..f3c0dbd7 100644
+--- a/host/apple/Sources/ExactKit/IOS/CaptureIOS.swift
++++ b/host/apple/Sources/ExactKit/IOS/CaptureIOS.swift
+@@ -30,12 +30,13 @@ package enum Capture {
+     /// present — the measure's baseline, and the fixture's oracle.
+     package static let cpu = ProcessInfo.processInfo.environment["EXACT_CAPTURE"] == "cpu"
+     /// The subtree painted at `scale`: premultiplied RGBA, rows top-down,
+-    /// transparent where nothing painted.
+-    package static func bitmap(of view: UIView, scale: CGFloat) -> Bitmap? {
++    /// transparent where nothing painted. `gpu: false` paints it with Core
++    /// Graphics where Metal is present too.
++    package static func bitmap(of view: UIView, scale: CGFloat, gpu: Bool = true) -> Bitmap? {
+         let w = Int((view.bounds.width * scale).rounded()), h = Int((view.bounds.height * scale).rounded())
+         guard let bitmap = Bitmap.blank(width: w, height: h) else { return nil }
+         // The GPU, where there is one (`Shadow`); Core Graphics otherwise.
+-        if !cpu, let shadow = Shadow.shared {
++        if gpu, !cpu, let shadow = Shadow.shared {
+             capturing = true
+             let ok = shadow.render(view, scale: scale, into: bitmap)
+             capturing = false
+diff --git a/host/apple/Sources/ExactSurfaces/GpuIOS.swift b/host/apple/Sources/ExactSurfaces/GpuIOS.swift
+index e7666b19..a248992e 100644
+--- a/host/apple/Sources/ExactSurfaces/GpuIOS.swift
++++ b/host/apple/Sources/ExactSurfaces/GpuIOS.swift
+@@ -393,7 +393,10 @@ final class CanvasesHost {
+             let hidden = child.hiddenByHost
+             if child.placementHidden { child.isHidden = false }
+             defer { child.isHidden = hidden }
+-            guard let bitmap = Capture.bitmap(of: child, scale: scale), let data = bitmap.bytes else { continue }
++            // On the CPU: the GPU capture's readback can land before the
++            // renderer has drawn this child, so a child got the picture the
++            // last capture of its size left (one button another's) or none.
++            guard let bitmap = Capture.bitmap(of: child, scale: scale, gpu: false), let data = bitmap.bytes else { continue }
+             guard live(e.view.id) === e else { return false }
+             let f = child.frame
+             let r = m.child(e.id, UInt32(i), child.props["testId"] ?? "", Float(f.origin.x), Float(f.origin.y), Float(f.width), Float(f.height), UInt32(bitmap.width), UInt32(bitmap.height), UnsafePointer(data.assumingMemoryBound(to: UInt8.self)), bitmap.height * bitmap.bytesPerRow)
