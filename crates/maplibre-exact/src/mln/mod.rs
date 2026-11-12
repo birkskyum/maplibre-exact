@@ -14,9 +14,10 @@ mod blit;
 mod content;
 mod input;
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use exact_gpu::{Frame, InputEvent, PointerPhase, Surface, SurfaceError, Value, wgpu};
+use exact_gpu::{AssetChanges, AssetError, Frame, InputEvent, PointerPhase, Surface, SurfaceError, Value, wgpu};
 use mln_actor::RunLoop;
 use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
@@ -25,6 +26,7 @@ use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use serde_json::Value as Json;
 
@@ -57,6 +59,9 @@ pub struct MapSurface {
     record: Option<Record>,
     error: Option<SurfaceError>,
     input_changed: bool,
+    /// The content's images asked of the host, by path, and those decoded.
+    asked: Vec<String>,
+    decoded: HashMap<String, PremultipliedImage>,
 }
 
 /// The map and what draws it, made at the first frame, on the device that
@@ -135,7 +140,7 @@ impl Surface for MapSurface {
             engine.command(command, frame.now_ms);
         }
         let mut events = Vec::new();
-        let wants_frame = engine.frame(frame, &mut events);
+        let wants_frame = engine.frame(frame, &self.decoded, &mut events);
         if let Some(texture) = engine.target.color_texture() {
             engine.blit.draw(device, encoder, target, format, &texture);
         }
@@ -145,6 +150,63 @@ impl Surface for MapSurface {
         self.record = Some(engine.record());
         self.events.extend(events.iter().map(|event| event.name().to_owned()));
         wants_frame
+    }
+
+    /// Asks the host for the content's images. Content names them from the
+    /// app's folder, as Contract does (`assets/pin.png`), and the host takes
+    /// names inside `assets/`.
+    fn assets(&mut self) -> AssetChanges {
+        let wanted: Vec<String> = self
+            .inputs
+            .iter()
+            .flat_map(|inputs| inputs.content.images.iter().map(|image| image.src.clone()))
+            .collect();
+        let retired: Vec<String> =
+            self.asked.iter().filter(|src| !wanted.contains(src)).filter_map(|src| in_assets(src)).collect();
+        self.asked.retain(|src| wanted.contains(src));
+        self.decoded.retain(|src, _| wanted.contains(src));
+        let mut requests = Vec::new();
+        for src in wanted {
+            if self.asked.contains(&src) {
+                continue;
+            }
+            self.asked.push(src.clone());
+            match in_assets(&src) {
+                Some(name) => requests.push(name),
+                None => {
+                    let message = format!("maplibre: image {src} must be a path under assets/");
+                    self.events.push(Event::Error.name().to_owned());
+                    self.error = Some(SurfaceError(message));
+                }
+            }
+        }
+        AssetChanges { requests, retired }
+    }
+
+    fn asset(&mut self, name: &str, bytes: Result<&[u8], AssetError>) {
+        let name = &format!("assets/{name}");
+        let decoded = match bytes {
+            Ok(bytes) => mln_image::decode_image(bytes).map_err(|e| e.message),
+            Err(AssetError::Missing) => Err("no such asset".to_owned()),
+            Err(AssetError::Failed(why)) => Err(why),
+        };
+        match decoded {
+            Ok(image) => {
+                self.decoded.insert(name.to_owned(), image);
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.content_changed = true;
+                    engine.idle = false;
+                }
+            }
+            Err(why) => {
+                let message = format!("maplibre: image {name}: {why}");
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.error = Some(message.clone());
+                }
+                self.events.push(Event::Error.name().to_owned());
+                self.error = Some(SurfaceError(message));
+            }
+        }
     }
 
     fn frame_ready(&self) -> bool {
@@ -390,7 +452,7 @@ impl Engine {
 
     /// Runs the loop, the gestures and the map for `frame`, draws the map's
     /// latest update, and returns whether the map wants another frame.
-    fn frame(&mut self, frame: &Frame, events: &mut Vec<Event>) -> bool {
+    fn frame(&mut self, frame: &Frame, decoded: &HashMap<String, PremultipliedImage>, events: &mut Vec<Event>) -> bool {
         self.resize(frame);
         RUN_LOOP.with(|run_loop| {
             let start = std::time::Instant::now();
@@ -414,7 +476,7 @@ impl Engine {
             }
         }
         self.map_events(events);
-        self.apply_content(events);
+        self.apply_content(decoded, events);
         if self.updates.generation() != self.drawn {
             self.idle = false;
             self.draw();
@@ -458,12 +520,12 @@ impl Engine {
         }
     }
 
-    fn apply_content(&mut self, events: &mut Vec<Event>) {
+    fn apply_content(&mut self, decoded: &HashMap<String, PremultipliedImage>, events: &mut Vec<Event>) {
         if !self.style_loaded || !self.content_changed {
             return;
         }
         self.content_changed = false;
-        let (held, errors) = content::apply(self.map.style_mut(), &self.held, &self.applied.content);
+        let (held, errors) = content::apply(self.map.style_mut(), &self.held, &self.applied.content, decoded);
         self.held = held;
         if let Some(message) = errors.into_iter().reduce(|all, error| format!("{all}; {error}")) {
             self.fail(message, events);
@@ -582,6 +644,11 @@ fn feature(feature: &mln_util::feature::Feature) -> protocol::Feature {
         source_layer: feature.source_layer.clone(),
         properties,
     }
+}
+
+/// The name the host takes for an app-relative path under `assets/`.
+fn in_assets(src: &str) -> Option<String> {
+    src.strip_prefix("assets/").filter(|name| !name.is_empty()).map(str::to_owned)
 }
 
 /// The canvas's size in whole points, at least one by one.

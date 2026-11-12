@@ -18,7 +18,8 @@ canvas surface=maplibre(style="https://tiles.openfreemap.org/styles/liberty", lo
 
 - `content` is the app's sources and layers in the
   [MapLibre Style Specification](https://maplibre.org/maplibre-style-spec/)'s terms, which the data
-  module builds (`{"sources": {…}, "layers": […]}`). The map applies what changed, new GeoJSON data and
+  module builds (`{"sources": {…}, "layers": […], "images": {…}}`), with images from the app's
+  `assets/`. The map applies what changed, new GeoJSON data and
   changed paint and layout properties in place and the rest by adding and removing layers and sources.
 - `options` limits the camera and turns gestures off, with GL JS's `MapOptions` names (`minZoom`,
   `maxZoom`, `minPitch`, `maxPitch`, `maxBounds`, `interactive`, `dragRotate`, `pitchWithRotate`,

@@ -41,6 +41,8 @@ the app's state, typed in TypeScript.
   and sources again.
 - Content is applied once the style has loaded, and again after a new style loads, so switching base
   styles keeps it.
+- `images` names the app's images that layers use, such as an `icon-image`, by their paths under
+  `assets/`. The surface asks Exact for each, decodes it with mln-rs and adds it to the style.
 - A click queries the content's layers at the point, widened by `hitPadding`, and the record's `click`
   lists their features topmost first, with `id`, `layer`, `source`, `sourceLayer` and `properties`.
 
@@ -77,7 +79,7 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 | Styling, switching styles at run time and keeping content | Done, with the `setStyle` command or a new `style` |
 | Clustering | The GeoJSON source's cluster options pass through; expanding a cluster isn't there |
 | Feature queries and feature state | Not yet |
-| Images and icons | Not yet |
+| Images and icons | Done, as content `images` from the app's `assets/`, which Exact delivers to the surface |
 | Controls, the compass, scale bar and attribution | The record's `attribution`, which the app shows over the map; no compass or scale bar |
 | Terrain and hillshade | Up to the style; untested on mln-rs |
 | Location, offline, requests, snapshotter | Not yet |

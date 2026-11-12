@@ -98,13 +98,19 @@ impl Inputs {
 /// GL JS's `addLayer` takes it, or a type of layer with `beforeType`, which
 /// draws it under the base style's first layer of that type, so `"symbol"`
 /// draws it under the labels whatever the style names them. A layer may use a
-/// source of the base style.
+/// source of the base style. `images` names the app's images that layers use,
+/// such as an `icon-image`, by their paths under the app's `assets/` folder,
+/// written from the app's folder as Contract writes them:
+/// `"pin": "assets/pin.png"`, or `{"src": …, "pixelRatio": 2, "sdf": false}`
+/// as GL JS's `addImage` takes them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Content {
     /// Sources by id.
     pub sources: Vec<(String, Json)>,
     /// Layers in drawing order, the last on top.
     pub layers: Vec<Layer>,
+    /// Images by the name layers use.
+    pub images: Vec<Image>,
     /// How many points around a click still hit a feature, which makes small
     /// circles and thin lines easier to tap.
     pub hit_padding: f64,
@@ -121,6 +127,19 @@ pub struct Layer {
     /// The layer as the style specification writes it, without `beforeId`
     /// and `beforeType`.
     pub json: Json,
+}
+
+/// One of the app's images.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Image {
+    /// The name layers use.
+    pub id: String,
+    /// Its path among the app's assets.
+    pub src: String,
+    /// Image pixels per point: 2 for an image drawn at twice the size it shows.
+    pub pixel_ratio: f32,
+    /// Whether it is a signed distance field, which `icon-color` tints.
+    pub sdf: bool,
 }
 
 impl Content {
@@ -178,6 +197,30 @@ impl Content {
                 }
             }
             Some(_) => return Err("maplibre: content's layers must be an array".into()),
+        }
+        match object.remove("images") {
+            None => {}
+            Some(Json::Object(images)) => {
+                for (id, image) in images {
+                    let image = match image {
+                        Json::String(src) => Image { id, src, pixel_ratio: 1.0, sdf: false },
+                        Json::Object(image) => {
+                            let Some(Json::String(src)) = image.get("src") else {
+                                return Err(format!("maplibre: content image {id} has no src"));
+                            };
+                            Image {
+                                src: src.clone(),
+                                pixel_ratio: image.get("pixelRatio").and_then(Json::as_f64).unwrap_or(1.0) as f32,
+                                sdf: image.get("sdf").and_then(Json::as_bool).unwrap_or(false),
+                                id,
+                            }
+                        }
+                        _ => return Err(format!("maplibre: content image {id} must be a path or an object")),
+                    };
+                    content.images.push(image);
+                }
+            }
+            Some(_) => return Err("maplibre: content's images must be an object of images by name".into()),
         }
         match object.remove("hitPadding") {
             None => {}
@@ -472,6 +515,19 @@ mod tests {
         assert_eq!(content.layers[0].before.as_deref(), Some("labels"));
         assert!(content.layers[0].json.get("beforeId").is_none());
         assert_eq!(content.hit_padding, 6.0);
+    }
+
+    #[test]
+    fn content_images_are_paths_or_objects() {
+        let content = Content::parse(r#"{"images":{"pin":"assets/pin.png","dot":{"src":"assets/dot@2x.png","pixelRatio":2}}}"#);
+        let Ok(content) = content else { panic!("{content:?}") };
+        assert_eq!(
+            content.images,
+            [
+                Image { id: "pin".into(), src: "assets/pin.png".into(), pixel_ratio: 1.0, sdf: false },
+                Image { id: "dot".into(), src: "assets/dot@2x.png".into(), pixel_ratio: 2.0, sdf: false },
+            ]
+        );
     }
 
     #[test]

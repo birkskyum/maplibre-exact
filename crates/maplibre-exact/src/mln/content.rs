@@ -4,7 +4,11 @@
 //! can't change in place (a source's type or tiles, a layer's type or source,
 //! the layers' order) is removed and added again.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use mln_conversion::{Convertible, Error as ConversionError};
+use mln_util::image::PremultipliedImage;
 use mln_style::Style;
 use mln_style::conversion::{convert_layer, convert_source};
 use mln_style::sources::geojson_source::GeoJSONSource;
@@ -12,12 +16,51 @@ use serde_json::Value as Json;
 
 use crate::protocol::{Content, Layer};
 
-/// Brings `style` from `applied` to `desired`, and returns what the style
-/// then holds of the content and the errors on the way. What failed to add
-/// is left out, so the next change tries it again.
-pub(super) fn apply(style: &mut Style, applied: &Content, desired: &Content) -> (Content, Vec<String>) {
+/// Brings `style` from `applied` to `desired`, with the images decoded so far
+/// by their paths, and returns what the style then holds of the content and
+/// the errors on the way. What failed to add, or an image still on its way, is
+/// left out, so the next change tries it again.
+pub(super) fn apply(
+    style: &mut Style,
+    applied: &Content,
+    desired: &Content,
+    decoded: &HashMap<String, PremultipliedImage>,
+) -> (Content, Vec<String>) {
     let mut errors = Vec::new();
     let mut held = applied.clone();
+
+    // Images go first and come in first, so layers find them.
+    held.images.retain(|image| {
+        let keep = desired.images.contains(image);
+        if !keep {
+            style.remove_image(&image.id);
+        }
+        keep
+    });
+    for image in &desired.images {
+        if held.images.contains(image) {
+            continue;
+        }
+        let Some(pixels) = decoded.get(&image.src) else { continue };
+        let made = mln_style::image::Impl::new(
+            image.id.clone(),
+            pixels.clone(),
+            image.pixel_ratio,
+            image.sdf,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            None,
+        );
+        match made {
+            Ok(made) => {
+                style.add_image(Arc::new(made));
+                held.images.push(image.clone());
+            }
+            Err(e) => errors.push(format!("maplibre: image {}: {}", image.id, e.message)),
+        }
+    }
 
     // Sources that change in place, and those that go or are replaced.
     let mut replaced = Vec::new();
@@ -258,7 +301,7 @@ mod tests {
     #[test]
     fn content_draws_over_the_base_style_in_order_unless_it_names_a_layer_to_draw_under() {
         let mut style = style();
-        let (held, errors) = apply(&mut style, &Content::default(), &content(&dots("red")));
+        let (held, errors) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
         assert!(style.get_source("points").is_some());
@@ -275,7 +318,7 @@ mod tests {
                           {"id":"city-names","type":"symbol","source":"points"}]}"#,
         );
         let under_labels = r#"{"layers":[{"id":"trail","type":"line","source":"points","beforeType":"symbol"}]}"#;
-        let (_, errors) = apply(&mut style, &Content::default(), &content(under_labels));
+        let (_, errors) = apply(&mut style, &Content::default(), &content(under_labels), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "trail", "road-names", "city-names"]);
     }
@@ -283,8 +326,8 @@ mod tests {
     #[test]
     fn a_changed_paint_property_is_set_on_the_layer_that_is_there() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")));
-        let (held, errors) = apply(&mut style, &held, &content(&dots("blue")));
+        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors) = apply(&mut style, &held, &content(&dots("blue")), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(paint(&style, "dots", "circle-color"), serde_json::json!(["rgba", 0.0, 0.0, 255.0, 1.0]));
         assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
@@ -294,12 +337,12 @@ mod tests {
     #[test]
     fn a_removed_property_goes_back_to_its_default() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")));
+        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
         let without = r#"{"sources":{"points":POINTS},"layers":[
             {"id":"halo","type":"circle","source":"points","beforeId":"labels"},
             {"id":"dots","type":"circle","source":"points"}]}"#
             .replace("POINTS", POINTS);
-        apply(&mut style, &held, &content(&without));
+        apply(&mut style, &held, &content(&without), &HashMap::new());
         assert_eq!(paint(&style, "dots", "circle-color"), Json::Null);
     }
 
@@ -313,17 +356,17 @@ mod tests {
                     {{"id":"{second}","type":"circle","source":"points"}}]}}"#
             ))
         };
-        let (held, _) = apply(&mut style, &Content::default(), &two("a", "b"));
+        let (held, _) = apply(&mut style, &Content::default(), &two("a", "b"), &HashMap::new());
         assert_eq!(layers(&style), ["water", "labels", "a", "b"]);
-        apply(&mut style, &held, &two("b", "a"));
+        apply(&mut style, &held, &two("b", "a"), &HashMap::new());
         assert_eq!(layers(&style), ["water", "labels", "b", "a"]);
     }
 
     #[test]
     fn content_that_goes_leaves_the_style_as_it_was() {
         let mut style = style();
-        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")));
-        let (held, errors) = apply(&mut style, &held, &Content::default());
+        let (held, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors) = apply(&mut style, &held, &Content::default(), &HashMap::new());
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(layers(&style), ["water", "labels"]);
         assert!(style.get_source("points").is_none());
@@ -331,10 +374,24 @@ mod tests {
     }
 
     #[test]
+    fn an_image_comes_in_once_it_is_decoded_and_goes_with_the_content() {
+        let mut style = style();
+        let pin = content(r#"{"images":{"pin":"assets/pin.png"}}"#);
+        let (held, _) = apply(&mut style, &Content::default(), &pin, &HashMap::new());
+        assert!(style.get_image("pin").is_none());
+        let decoded = HashMap::from([("assets/pin.png".to_owned(), PremultipliedImage::new(mln_util::size::Size::new(4, 4)))]);
+        let (held, errors) = apply(&mut style, &held, &pin, &decoded);
+        assert_eq!(errors, Vec::<String>::new());
+        assert!(style.get_image("pin").is_some());
+        apply(&mut style, &held, &Content::default(), &decoded);
+        assert!(style.get_image("pin").is_none());
+    }
+
+    #[test]
     fn a_layer_that_fails_is_left_out_and_reported() {
         let mut style = style();
         let bad = r#"{"layers":[{"id":"x","type":"blob"}]}"#;
-        let (held, errors) = apply(&mut style, &Content::default(), &content(bad));
+        let (held, errors) = apply(&mut style, &Content::default(), &content(bad), &HashMap::new());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(held.layers.is_empty());
     }

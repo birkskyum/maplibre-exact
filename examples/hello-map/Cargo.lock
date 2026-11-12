@@ -1885,6 +1885,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-image",
  "mln-rs-map",
  "mln-rs-renderer",
  "mln-rs-style",

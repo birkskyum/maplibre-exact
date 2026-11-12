@@ -15,6 +15,7 @@ mln = [
     "dep:mln_conversion",
     "dep:mln_gestures",
     "dep:mln_gfx",
+    "dep:mln_image",
     "dep:mln_map",
     "dep:mln_renderer",
     "dep:mln_style",
@@ -32,6 +33,7 @@ mln_actor = { package = "mln-rs-actor", path = "../../../mln-rs/crates/mln_actor
 mln_conversion = { package = "mln-rs-conversion", path = "../../../mln-rs/crates/mln_conversion", optional = true }
 mln_gestures = { package = "mln-rs-gestures", path = "../../../mln-rs/crates/mln_gestures", optional = true }
 mln_gfx = { package = "mln-rs-gfx", path = "../../../mln-rs/crates/mln_gfx", optional = true }
+mln_image = { package = "mln-rs-image", path = "../../../mln-rs/crates/mln_image", optional = true }
 mln_map = { package = "mln-rs-map", path = "../../../mln-rs/crates/mln_map", optional = true }
 mln_renderer = { package = "mln-rs-renderer", path = "../../../mln-rs/crates/mln_renderer", optional = true, features = ["font-face-shaper"] }
 mln_style = { package = "mln-rs-style", path = "../../../mln-rs/crates/mln_style", optional = true }

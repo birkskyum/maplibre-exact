@@ -17,6 +17,10 @@ const walk = ['hb', 'eth', 'grossmuenster', 'fraumuenster', 'opera'].map(
 // The map's own sources and layers, in the MapLibre Style Specification's terms.
 const content = (chosen: string) => ({
   hitPadding: 8,
+  images: {
+    pin: { src: 'assets/pin.png', pixelRatio: 2 },
+    'pin-selected': { src: 'assets/pin-selected.png', pixelRatio: 2 },
+  },
   sources: {
     walk: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: walk } } },
     places: {
@@ -42,25 +46,18 @@ const content = (chosen: string) => ({
     },
     {
       id: 'places',
-      type: 'circle',
-      source: 'places',
-      paint: {
-        'circle-radius': ['case', ['==', ['get', 'id'], chosen], 10, 7],
-        'circle-color': ['case', ['==', ['get', 'id'], chosen], '#e5484d', '#1f6feb'],
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-      },
-    },
-    {
-      id: 'place-names',
       type: 'symbol',
       source: 'places',
       layout: {
+        'icon-image': ['case', ['==', ['get', 'id'], chosen], 'pin-selected', 'pin'],
+        'icon-anchor': 'bottom',
+        'icon-allow-overlap': true,
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular'],
         'text-size': 13,
         'text-anchor': 'top',
-        'text-offset': [0, 0.9],
+        'text-offset': [0, 0.2],
+        'text-optional': true,
       },
       paint: { 'text-color': '#1c2024', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
     },
