@@ -36,6 +36,14 @@ let options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Defaul
 eframe::run_native("My map", options, Box::new(|_| Ok(Box::new(App { map: maplibre_egui::EguiMap::new(inputs) }))))
 ```
 
+A marker of the content holds any widget at its place, with its anchor and offset, as GL JS's `Marker`
+holds an element:
+
+```rust
+// in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+self.map.marker(ui.ctx(), "station", |ui| ui.label("Trains"));
+```
+
 ## Running the example
 
 [`examples/hello-map`](examples/hello-map) is a map of a few places in Zürich, which a tap names, with
@@ -44,13 +52,13 @@ as the core does.
 
 ```sh
 cargo run -p hello-map-egui
-HELLO_MAP_SNAPSHOTS=/tmp/hello-map cargo run -p hello-map-egui   # a short walk, saved as PNG files
+cargo test -p hello-map-egui -- --ignored   # a short walk offscreen, saved in target/tmp/hello-map-walk
 ```
 
-The walk's window opens without taking the front, on a second display where there is one, since a
-covered window gets no frames.
+The walk drives the app in egui's test harness, which renders with wgpu and shows no window. The map
+loads, flies to Zürich, a tap names Zürich HB, and the places fit in view.
 
 ## Not done yet
 
 - Windows, Linux, the web and phones, where egui also renders with wgpu.
-- Markers: egui widgets held at places on the map.
+- Markers that turn with the map or lie on it as it pitches. egui doesn't turn widgets.

@@ -42,6 +42,8 @@ pub struct EguiMap {
     next_touch: u32,
     /// Whether a trackpad pinch or rotation goes on.
     pinching: bool,
+    /// Where the map was shown last.
+    rect: Option<egui::Rect>,
 }
 
 impl EguiMap {
@@ -57,6 +59,7 @@ impl EguiMap {
             touches: HashMap::new(),
             next_touch: 1,
             pinching: false,
+            rect: None,
         }
     }
 
@@ -98,6 +101,12 @@ impl EguiMap {
         self.record.as_ref()
     }
 
+    /// Where the map was shown last, in the UI's points.
+    #[must_use]
+    pub fn rect(&self) -> Option<egui::Rect> {
+        self.rect
+    }
+
     /// Why the map couldn't be made, if it couldn't.
     #[must_use]
     pub fn error(&self) -> Option<&str> {
@@ -108,6 +117,7 @@ impl EguiMap {
     /// on the device of `render_state`.
     pub fn show(&mut self, ui: &mut egui::Ui, render_state: &RenderState) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+        self.rect = Some(rect);
         self.input(ui, rect);
         let viewport = Viewport {
             size: Size::new(rect.width().round().max(1.0) as u32, rect.height().round().max(1.0) as u32),
@@ -142,6 +152,34 @@ impl EguiMap {
             ui.ctx().request_repaint();
         }
         response
+    }
+
+    /// Shows `add_contents` at the place the content's marker `id` names, as
+    /// GL JS's `Marker` holds an element: its anchor at the marker's point,
+    /// moved by its offset, on the map as [`show`](Self::show) last drew it.
+    /// Shows nothing while the place is off the map or behind the globe, or
+    /// before the map drew. The contents stay upright: egui doesn't turn or
+    /// tilt widgets.
+    pub fn marker<R>(&self, ctx: &egui::Context, id: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+        let rect = self.rect?;
+        let marker = self.component.markers().iter().find(|marker| marker.id == id)?;
+        // A view of no size: its top-left corner is where the anchor goes.
+        let placement = self.component.place(marker, [0.0, 0.0, 0.0, 0.0])?;
+        if placement.hidden || marker.lng_lat.is_none() {
+            return None;
+        }
+        let at = rect.min + egui::vec2(placement.homography[2], placement.homography[5]);
+        let [x, y] = marker.anchor.fraction();
+        let align = |fraction: f64| match fraction {
+            f if f <= 0.0 => egui::Align::Min,
+            f if f >= 1.0 => egui::Align::Max,
+            _ => egui::Align::Center,
+        };
+        let area = egui::Area::new(egui::Id::unique(("maplibre-marker", id)))
+            .fixed_pos(at)
+            .pivot(egui::Align2([align(x), align(y)]))
+            .constrain(false);
+        Some(area.show(ctx, add_contents).inner)
     }
 
     /// Hands the map the input of this frame that is its own: what starts over
