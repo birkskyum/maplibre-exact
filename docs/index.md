@@ -3,12 +3,11 @@
 MapLibre maps for Rust UI frameworks, drawn by [mln-rs](https://github.com/louwers/mln-rs), the Rust
 port of MapLibre Native.
 
-An app declares its map the way [MapLibre Compose](https://github.com/maplibre/maplibre-compose) has it
-declared, as a base style, the app's own sources and layers over it, a camera and options, all in JSON
-with MapLibre GL JS's names. When the app's state changes, the map changes to match. The app sends the
-map commands such as `flyTo` and `fitBounds`, hears of events such as `click` and `moveend`, and reads
-the map's record. That side looks the same whichever framework hosts the map, and
-[the map model](model.md) describes it.
+An app declares its map as a base style, the app's own sources and layers over it, a camera and
+options, all in JSON with MapLibre GL JS's names. When the app's state changes, the map changes to
+match. The app sends the map commands such as `flyTo` and `fitBounds`, hears of events such as
+`click` and `moveend`, and reads the map's record. That side looks the same whichever framework
+hosts the map, and [the map model](model.md) describes it.
 
 Each framework has a host crate, which gives the map somewhere to draw and its input, and gives the app
 the model in the framework's own terms. Every host's example is the same app, Hello Map, a map of a few
