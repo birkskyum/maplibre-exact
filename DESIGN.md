@@ -204,7 +204,7 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 
 ## Where it runs
 
-- Slint, egui and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
+- Slint, egui, Bevy and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
   content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk. Native
   Shell on the iOS simulator too, without the tap. Whisker on an Android 15 emulator, with the
   emulator's own touches: the buttons, a tap naming a place and a drag, with pauses past the
@@ -230,9 +230,8 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- Slint and egui beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an Android
-  phone.
-- Bevy, iced and GPUI. Bevy draws with the same wgpu as mln-rs, so its host works as egui's does.
-  iced is on an older wgpu, and GPUI on Metal and Vulkan of its own, so theirs need mln-rs's exported
-  textures.
+- Slint, egui and Bevy beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an
+  Android phone.
+- iced and GPUI. iced is on an older wgpu, and GPUI on Metal and Vulkan of its own, so their hosts
+  need mln-rs's exported textures.
 - MapLibre Native through maplibre-native-ffi, and GL JS on the web, as engines behind `Component`.

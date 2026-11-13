@@ -10,3 +10,4 @@
 /whisker/android/build/
 /whisker/android/.gradle/
 /egui/target/
+/bevy/target/

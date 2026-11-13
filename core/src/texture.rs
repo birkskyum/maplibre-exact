@@ -12,7 +12,7 @@ use mln_webgpu::BorrowedTextures;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// An `Rgba8Unorm` texture, premultiplied as mln-rs draws, that render passes
-/// draw into and shaders sample.
+/// draw into and shaders sample, as it is or through an `Rgba8UnormSrgb` view.
 pub struct MapTexture {
     pub texture: wgpu::Texture,
 }
@@ -29,7 +29,9 @@ impl MapTexture {
             dimension: wgpu::TextureDimension::D2,
             format: FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+            // A host that samples colors as linear, as Bevy does, reads the
+            // map's sRGB pixels through an sRGB view.
+            view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
         });
         MapTexture { texture }
     }
