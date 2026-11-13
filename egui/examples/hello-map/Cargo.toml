@@ -1,0 +1,28 @@
+[package]
+name = "hello-map-egui"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "An egui app with a MapLibre map"
+publish = false
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts"] }
+maplibre-egui = { path = "../.." }
+serde_json = "1"
+# Only for HELLO_MAP_SNAPSHOTS, whose walk saves the window as PNG files.
+png = "0.18"
+
+# Only for HELLO_MAP_SNAPSHOTS, whose walk shows its window on a second
+# display without taking the front of the screen, and saves it.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSResponder",
+    "NSScreen",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry"] }
+winit = "0.30"

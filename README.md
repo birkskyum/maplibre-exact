@@ -23,6 +23,8 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
   it and run its example.
 - [`slint`](slint) is `maplibre-slint`, the map in [Slint](https://slint.dev) apps, on Slint's wgpu
   renderer. It runs on macOS. [Its README](slint/README.md) says how to use it.
+- [`egui`](egui) is `maplibre-egui`, the map in [egui](https://www.egui.rs) apps, on egui's wgpu
+  renderer. It runs on macOS. [Its README](egui/README.md) says how to use it.
 - [`nsh`](nsh) is `maplibre-nsh`, the map in [Native Shell](https://nsh.dev) apps, as a native
   component whose view the map renders into. It runs on macOS and iOS. [Its README](nsh/README.md)
   says how to use it.
@@ -31,7 +33,8 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
   [Its README](whisker/README.md) says how to use it.
 
 Each host folder builds on the core alone, and becomes a repository of its own once the core's API
-settles.
+settles. Every host but Exact's drives its maps through the core's `Component`, so an engine other than
+mln-rs, such as MapLibre Native or GL JS on the web, can stand in behind it without the hosts knowing.
 
 ## Building
 
