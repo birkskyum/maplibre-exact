@@ -4,13 +4,13 @@ MapLibre maps in [Whisker](https://whisker.rs) apps, drawn by mln-rs through
 [maplibre-rust-ui](../README.md)'s engine into a native view of their own. It runs on iOS and
 Android.
 
-The crate is a Whisker module. Its Rust side declares the element, `Map`. Its Swift package
+The crate is a Whisker module. Its Rust side declares the elements, `Map` and `MapMarker`. Its Swift package
 ([`apple`](apple)) is the view on iOS and macOS, whose layer is a `CAMetalLayer`, and its Gradle
 project ([`android`](android)) the view on Android, a `SurfaceView`. The map renders into either on a
 thread of its own. The view hands the map its props, size, touches, mouse and trackpad through the
 crate's C functions ([`ffi.rs`](src/ffi.rs)) or JNI functions ([`android.rs`](src/android.rs)), runs
 its frames on a display link or the choreographer while the map wants them, and posts the events each
-frame returns.
+frame returns, and moves the map's markers to their places.
 
 The app declares the map in its props, as maplibre-rust-ui models it ([`model.rs`](../core/src/model.rs)):
 
@@ -40,11 +40,26 @@ render! {
 map.fly_to(&json!({"center": [8.54, 47.37], "zoom": 14}));
 ```
 
+A `MapMarker` among the map's children holds the app's views at the place the content's marker of the
+same name gives, with its anchor and offset, as GL JS's `Marker` holds an element. The view moves the
+marker's node there after each frame, turns it with the map when the marker's `rotationAlignment` is
+`map`, and lays it on the map as it pitches when its `pitchAlignment` is. The node keeps its taps and
+its accessibility, and hides while its place is off the map or behind the globe.
+
+```rust
+// in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+Map(map_style: STYLE, content: content, style: css!(flex_grow: 1.0)) {
+    MapMarker(marker: "station", style: css!(position: PositionKind::Absolute)) {
+        Text(value: "Trains")
+    }
+}
+```
+
 ## Running the example
 
 [`examples/hello-map`](examples/hello-map) is a map of a few places in Zürich, which a tap names, with
-buttons that fly there, fit them in view and turn the globe on. It needs mln-rs next to this repository,
-as the core does, and Whisker's CLI.
+buttons that fly there, fit them in view and turn the globe on, and a callout over the station. It
+needs mln-rs next to this repository, as the core does, and Whisker's CLI.
 
 ```sh
 cd examples/hello-map
@@ -59,7 +74,8 @@ C function as the view's touches: on a simulator,
 ## Not done yet
 
 - macOS. The view has its AppKit side, with the mouse and the trackpad, but it is unchecked:
-  Whisker's macOS app takes the front of the screen when it starts.
+  Whisker's macOS app takes the front of the screen when it starts. Its markers only move, upright,
+  since AppKit's node layers keep Whisker's own transform.
 - A surface that Android takes away, as when the app goes to the background, isn't given back to the
   map yet.
-- Markers and the content's `images`.
+- The content's `images`.

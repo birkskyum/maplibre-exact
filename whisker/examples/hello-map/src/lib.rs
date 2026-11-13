@@ -1,13 +1,14 @@
 //! Hello Map in Whisker: a map of a few places in Zürich, which a tap names,
-//! with buttons that fly there, fit them in view and turn the globe on.
+//! with buttons that fly there, fit them in view and turn the globe on, and a
+//! callout over the station.
 //!
 //! With `HELLO_MAP_WALK` set the app takes a short walk on its own: the map
 //! loads, flies to Zürich, is tapped in the middle, where Zürich HB is then,
 //! and fits the places in view.
 
-use maplibre_whisker::{Map, MapEvent, MapHandle};
+use maplibre_whisker::{Map, MapEvent, MapHandle, MapMarker};
 use serde_json::{Value as Json, json};
-use whisker::css::{AlignItems, FlexDirection, JustifyContent};
+use whisker::css::{AlignItems, FlexDirection, JustifyContent, PositionKind};
 use whisker::prelude::*;
 use whisker::runtime::view::Element;
 
@@ -40,7 +41,8 @@ fn content(globe: bool) -> String {
                 "text-anchor": "top", "text-offset": [0, 0.9]},
              "paint": {"text-color": "#1d2b4f", "text-halo-color": "#ffffff", "text-halo-width": 1.5}}
         ],
-        "hitPadding": 6
+        "hitPadding": 6,
+        "markers": {"station": {"lngLat": PLACES[2].1, "anchor": "bottom", "offset": [0, -14]}}
     });
     if globe {
         content["projection"] = json!({"type": "globe"});
@@ -95,6 +97,14 @@ pub fn app() -> Element {
     );
     let label = StoredValue::new(Css::new().color(Color::hex(0xffffff)).font_size(px(15)));
     let note = StoredValue::new(Css::new().color(Color::hex(0x9a9aa2)).font_size(px(12)));
+    let callout = StoredValue::new(
+        Css::new()
+            .position(PositionKind::Absolute)
+            .background_color(Color::hex(0xffffff))
+            .border_radius(px(6))
+            .padding(px(6)),
+    );
+    let callout_label = StoredValue::new(Css::new().color(Color::hex(0x1d2b4f)).font_size(px(13)));
     render! {
         View(style: page) {
             Map(
@@ -114,7 +124,11 @@ pub fn app() -> Element {
                     status.set(event.record()["failure"].as_str().unwrap_or_default().to_owned());
                 },
                 style: css!(flex_grow: 1.0),
-            )
+            ) {
+                MapMarker(marker: "station", style: callout.get()) {
+                    Text(value: "Trains", style: callout_label.get())
+                }
+            }
             View(style: bar.get()) {
                 View(style: button.get(), on_tap: move |_| map.fly_to(&fly_to_zurich())) {
                     Text(value: "Zürich", style: label.get())

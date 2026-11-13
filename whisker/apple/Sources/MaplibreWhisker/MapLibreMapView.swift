@@ -1,8 +1,8 @@
 // The map's view: a view whose layer is a `CAMetalLayer`, which the Rust
 // map renders into on a thread of its own. The view hands the map its props,
 // size, input and commands through the crate's C functions (`src/ffi.rs`),
-// runs its frames on a display link while the map wants them, and posts the
-// events each frame returns.
+// runs its frames on a display link while the map wants them, posts the
+// events each frame returns, and moves its markers' nodes to their places.
 
 import Foundation
 import QuartzCore
@@ -43,6 +43,11 @@ private func maplibre_whisker_pinch(
 )
 @_silgen_name("maplibre_whisker_frame")
 private func maplibre_whisker_frame(_ map: UInt64, _ again: UnsafeMutablePointer<Bool>?) -> UnsafeMutablePointer<CChar>?
+@_silgen_name("maplibre_whisker_place")
+private func maplibre_whisker_place(
+    _ map: UInt64, _ marker: UnsafePointer<CChar>, _ x: Double, _ y: Double, _ width: Double, _ height: Double,
+    _ out: UnsafeMutablePointer<Double>?
+) -> Int32
 @_silgen_name("maplibre_whisker_free")
 private func maplibre_whisker_free(_ text: UnsafeMutablePointer<CChar>?)
 
@@ -151,6 +156,79 @@ public final class MapLibreLayerView: MapLibrePlatformView {
         if !again {
             link.isPaused = true
         }
+        placeMarkers()
+    }
+
+    /// Moves the nodes of the map's markers to where the content's markers
+    /// put them, on the map as its last frame drew it.
+    func placeMarkers() {
+        guard let node = superview?.superview else { return }
+        for marker in markers(in: node) {
+            place(marker)
+        }
+    }
+
+    /// The markers among a node's children, but not those of a map inside it.
+    private func markers(in view: MapLibrePlatformView) -> [MapLibreMarkerView] {
+        view.subviews.flatMap { child -> [MapLibreMarkerView] in
+            if child is MapLibreMapView { return [] }
+            if child.subviews.contains(where: { $0 is MapLibreMapView }) { return [] }
+            if let marker = child as? MapLibreMarkerView { return [marker] }
+            return markers(in: child)
+        }
+    }
+
+    private func place(_ marker: MapLibreMarkerView) {
+        guard let node = marker.superview, let parent = node.superview else { return }
+        #if canImport(UIKit)
+        let origin = node.layer.position
+        #else
+        // A node that isn't where the map moved it is where the layout put it.
+        if marker.placedOrigin != node.frame.origin { marker.layoutOrigin = node.frame.origin }
+        let origin = marker.layoutOrigin
+        #endif
+        let at = convert(origin, from: parent)
+        var h = [Double](repeating: 0, count: 9)
+        let placed = maplibre_whisker_place(
+            map, marker.marker, Double(at.x), Double(at.y), Double(node.bounds.width), Double(node.bounds.height), &h
+        )
+        if (placed == 2) != marker.hiddenByMap {
+            marker.hiddenByMap = placed == 2
+            node.isHidden = marker.hiddenByMap
+        }
+        #if canImport(UIKit)
+        if placed == 1 {
+            // The homography maps the node's points to the map's, and the layer
+            // turns about its zero anchor at the layout's origin.
+            let (x, y) = (Double(at.x), Double(at.y))
+            var transform = CATransform3DIdentity
+            transform.m11 = CGFloat(h[0] - x * h[6])
+            transform.m21 = CGFloat(h[1] - x * h[7])
+            transform.m41 = CGFloat(h[2] - x * h[8])
+            transform.m12 = CGFloat(h[3] - y * h[6])
+            transform.m22 = CGFloat(h[4] - y * h[7])
+            transform.m42 = CGFloat(h[5] - y * h[8])
+            transform.m14 = CGFloat(h[6])
+            transform.m24 = CGFloat(h[7])
+            transform.m44 = CGFloat(h[8])
+            node.layer.transform = transform
+            marker.placed = true
+        } else if marker.placed {
+            node.layer.transform = CATransform3DIdentity
+            marker.placed = false
+        }
+        #else
+        // AppKit's node layers keep Whisker's own transform, so a marker on
+        // macOS moves to its place upright.
+        let moved: CGPoint? = placed == 1
+            ? CGPoint(x: origin.x + CGFloat(h[2]) - at.x, y: origin.y + CGFloat(h[5]) - at.y) : nil
+        if let moved, moved != node.frame.origin {
+            node.setFrameOrigin(moved)
+        } else if moved == nil, marker.placedOrigin != nil {
+            node.setFrameOrigin(marker.layoutOrigin)
+        }
+        marker.placedOrigin = moved
+        #endif
     }
 
     private var scale: CGFloat {

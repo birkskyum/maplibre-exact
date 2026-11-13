@@ -13,6 +13,11 @@
 //! A click is `on_map_click`, since Whisker keeps `on_click` for its own
 //! gesture.
 //!
+//! A [`MapMarker`] among the map's children holds the app's views at the
+//! place the content's marker of the same name gives, with its anchor and
+//! offset, as GL JS's `Marker` holds an element, and turns them with the map
+//! or lays them on it as it pitches when the marker says so.
+//!
 //! ```ignore
 //! let map = MapHandle::new();
 //! render! {
@@ -22,7 +27,12 @@
 //!         camera: r#"{"center": [8.54, 47.37], "zoom": 11}"#,
 //!         on_map_click: move |event: MapEvent| println!("{}", event.record()["click"]),
 //!         style: css!(flex_grow: 1.0),
-//!     )
+//!     ) {
+//!         // in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+//!         MapMarker(marker: "station", style: css!(position: PositionKind::Absolute)) {
+//!             Text(value: "Trains")
+//!         }
+//!     }
 //! }
 //! ```
 //!
@@ -43,7 +53,7 @@ pub use maplibre_rust_ui::model;
 use serde_json::{Value as Json, json};
 use whisker::platform_module::WhiskerValue;
 use whisker::prelude::*;
-use whisker::runtime::view::Element;
+use whisker::runtime::view::{Children, Element};
 use whisker::{ElementRef, Signal};
 
 /// The element of the view this crate's package registers, whose events
@@ -61,8 +71,13 @@ pub fn native_map(
     on_map_click: MapEvent,
     on_contextmenu: MapEvent,
     on_error: MapEvent,
+    children: Children,
 ) {
 }
+
+/// Views the map holds at the place the content's marker `marker` gives.
+#[whisker::module_element(name = "maplibre:Marker", measurement = None)]
+pub fn map_marker(marker: Signal<String>, style: whisker::Style, children: Children) {}
 
 /// What an app does with an event of the map.
 #[derive(Clone)]
@@ -106,6 +121,8 @@ pub fn map(
     on_map_click: Option<MapCallback>,
     on_contextmenu: Option<MapCallback>,
     on_error: Option<MapCallback>,
+    /// [`MapMarker`]s, and views over the map such as controls.
+    children: Children,
 ) -> Element {
     let builder = NativeMap::builder();
     let builder = match handle {
@@ -123,12 +140,16 @@ pub fn map(
         .on_map_click(forward(on_map_click.clone()))
         .on_contextmenu(forward(on_contextmenu.clone()))
         .on_error(forward(on_error.clone()))
+        .children(children.clone())
         .build()
 }
 
 #[doc(hidden)]
 pub fn __whisker_element_module_definition() -> whisker::ElementModuleDefinition {
-    whisker::ElementModuleDefinition::new(env!("CARGO_PKG_NAME"), [native_map_schema::element_provider()])
+    whisker::ElementModuleDefinition::new(
+        env!("CARGO_PKG_NAME"),
+        [native_map_schema::element_provider(), map_marker_schema::element_provider()],
+    )
 }
 
 /// An event of the map, with its record.
@@ -216,6 +237,7 @@ mod tests {
         let schema = native_map_schema::schema();
         assert_eq!(schema.name, "maplibre:Map");
         assert_eq!(schema.commands.iter().map(|command| command.name.as_str()).collect::<Vec<_>>(), ["command"]);
+        assert_eq!(map_marker_schema::schema().name, "maplibre:Marker");
     }
 
     #[test]

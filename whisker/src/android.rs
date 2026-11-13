@@ -7,7 +7,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use jni::JNIEnv;
-use jni::objects::{JObject, JString};
+use jni::objects::{JFloatArray, JObject, JString};
 use jni::sys::{jboolean, jdouble, jint, jlong, jstring};
 
 use crate::ffi;
@@ -149,4 +149,31 @@ pub extern "system" fn Java_org_maplibre_whisker_MapLibreSurfaceView_nativeTakeP
 ) -> jstring {
     let posts = POSTS.with(|pending| pending.borrow_mut().remove(&id(map)));
     posts.and_then(|posts| env.new_string(posts).ok()).map_or(std::ptr::null_mut(), JString::into_raw)
+}
+
+/// Where the content's marker `marker` puts a view laid out at `x`, `y`,
+/// `width` by `height` points, as `maplibre_whisker_place` returns it, with
+/// the homography written to `out`'s 9 floats.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_org_maplibre_whisker_MapLibreSurfaceView_nativePlace(
+    mut env: JNIEnv,
+    _: JObject,
+    map: jlong,
+    marker: JString,
+    x: jdouble,
+    y: jdouble,
+    width: jdouble,
+    height: jdouble,
+    out: JFloatArray,
+) -> jint {
+    let marker = text(&mut env, &marker);
+    let Some(placement) = ffi::place(id(map), &marker, [x, y, width, height].map(|n| n as f32)) else { return 0 };
+    if placement.hidden {
+        return 2;
+    }
+    if env.set_float_array_region(&out, 0, &placement.homography).is_err() {
+        return 0;
+    }
+    1
 }

@@ -1,6 +1,7 @@
 //! The C functions the map's Swift view calls, on the main thread: it makes
 //! a map of its `CAMetalLayer`, hands it its props, size, input and commands,
-//! runs its frames while it wants them, and drops it. Each map has the id
+//! runs its frames while it wants them, places its markers' views after each,
+//! and drops it. Each map has the id
 //! [`maplibre_whisker_new`] returned, and an unknown id does nothing. A map
 //! wakes its view when it wants frames again, whoever handed it something.
 //! The Kotlin view on Android reaches the same maps through JNI.
@@ -12,6 +13,7 @@ use std::ptr::NonNull;
 
 use maplibre_rust_ui::component::{Component, Press};
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PinchPhase, WheelDelta};
+use maplibre_rust_ui::placement::Placement;
 use maplibre_rust_ui::runtime::{Driver, RenderTarget};
 use maplibre_rust_ui::util::geo::ScreenCoordinate;
 use maplibre_rust_ui::util::size::Size;
@@ -119,6 +121,22 @@ fn hand(map: u64, f: impl FnOnce(&mut Component)) {
 pub fn viewport(map: u64) -> Option<(f64, f64)> {
     let viewport = with_map(map, |map| map.component.viewport()).flatten()?;
     Some((f64::from(viewport.size.width), f64::from(viewport.size.height)))
+}
+
+/// Where the content's marker `marker` puts a view laid out at `frame` (x, y,
+/// width and height in points from the map's top-left corner). A marker at a
+/// place hides until the map has drawn.
+#[must_use]
+pub fn place(map: u64, marker: &str, frame: [f32; 4]) -> Option<Placement> {
+    with_map(map, |map| {
+        let component = &map.component;
+        let marker = component.markers().iter().find(|known| known.id == marker)?;
+        component.place(marker, frame).or_else(|| {
+            let hidden = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+            marker.lng_lat.map(|_| Placement { hidden: true, homography: hidden })
+        })
+    })
+    .flatten()
 }
 
 /// The text at `text`, empty for null or text that isn't UTF-8.
@@ -261,6 +279,41 @@ pub extern "C" fn maplibre_whisker_pinch(map: u64, x: f64, y: f64, scale: f64, r
     hand(map, |component| component.gesture(input));
 }
 
+/// Where the content's marker `marker` puts a view laid out at `x`, `y`,
+/// `width` by `height` points from the map's top-left corner: 0 leaves it
+/// where the layout put it, 1 places it by the homography written to `out`,
+/// which maps the view's points to the map's (row major), and 2 hides it, off
+/// the map or behind the globe.
+///
+/// # Safety
+///
+/// `marker` is null or a NUL-terminated string, and `out` is null or points
+/// to 9 `f64`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn maplibre_whisker_place(
+    map: u64,
+    marker: *const c_char,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    out: *mut f64,
+) -> i32 {
+    // SAFETY: the caller hands a NUL-terminated string.
+    let marker = unsafe { text(marker) };
+    let Some(placement) = place(map, marker, [x, y, width, height].map(|n| n as f32)) else { return 0 };
+    if placement.hidden {
+        return 2;
+    }
+    if !out.is_null() {
+        for (index, value) in placement.homography.into_iter().enumerate() {
+            // SAFETY: the caller hands 9 `f64`s.
+            unsafe { *out.add(index) = f64::from(value) };
+        }
+    }
+    1
+}
+
 /// Runs a frame, and sets `again` to whether the map wants another. Returns
 /// the events to post, `[{"name": "load", "record": "{…}"}, …]` with each
 /// record as JSON text, which [`maplibre_whisker_free`] frees, or null for
@@ -316,6 +369,10 @@ mod tests {
         assert_eq!(posts[0]["name"], "error");
         let record: Json = serde_json::from_str(posts[0]["record"].as_str().unwrap()).unwrap();
         assert_eq!(record["failure"], "maplibre: camera: zoom is a number");
+        // SAFETY: the marker's name is NUL-terminated, and a map that drew no frame writes nothing.
+        let placed =
+            unsafe { maplibre_whisker_place(map, c"station".as_ptr(), 0.0, 0.0, 40.0, 20.0, std::ptr::null_mut()) };
+        assert_eq!(placed, 0, "a map that drew no frame leaves its markers to the layout");
         maplibre_whisker_drop(map);
         // SAFETY: a dropped map's id does nothing.
         assert!(unsafe { maplibre_whisker_frame(map, std::ptr::null_mut()) }.is_null());

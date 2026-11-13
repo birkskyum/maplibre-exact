@@ -4,7 +4,7 @@ import rs.whisker.runtime.Module
 import rs.whisker.runtime.ModuleDefinition
 import rs.whisker.runtime.WhiskerModule
 
-/** The map's module: the KSP processor registers its view under the name the Rust element declares. */
+/** The map's module: the KSP processor registers its views under the names the Rust elements declare. */
 @WhiskerModule
 class MapLibreModule : Module() {
     override fun definition() = ModuleDefinition {
@@ -24,6 +24,11 @@ class MapLibreModule : Module() {
             }
             Command("command") { view: MapLibreMapView, value -> view.command(value.asString() ?: "") }
             Events("load", "moveend", "map_click", "contextmenu", "error")
+        }
+        View("maplibre:Marker", MapLibreMarkerView::class.java) {
+            Prop("marker", clear = { view: MapLibreMarkerView -> view.marker = "" }) { view: MapLibreMarkerView, value ->
+                view.marker = value.asString() ?: ""
+            }
         }
     }
 }

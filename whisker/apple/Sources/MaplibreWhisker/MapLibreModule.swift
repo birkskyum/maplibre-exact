@@ -1,5 +1,5 @@
-// The map's module: Whisker's codegen plugin registers its view under the
-// name the Rust element `maplibre_whisker::Map` declares.
+// The map's module: Whisker's codegen plugin registers its views under the
+// names the Rust elements `maplibre_whisker::Map` and `MapMarker` declare.
 
 import Foundation
 import WhiskerModule
@@ -26,6 +26,11 @@ public final class MapLibreModule: Module {
                     view.command(value.asString ?? "")
                 }
                 Events("load", "moveend", "map_click", "contextmenu", "error")
+            }
+            View("maplibre:Marker", MapLibreMarkerView.self) {
+                Prop("marker") { (view: MapLibreMarkerView, value: WhiskerValue) in
+                    view.marker = value.asString ?? ""
+                }
             }
         }
     }
