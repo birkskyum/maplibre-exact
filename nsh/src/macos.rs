@@ -2,27 +2,22 @@
 //! renders into on a thread of its own, and which takes the mouse and the
 //! trackpad itself.
 
-use std::cell::RefCell;
-use std::ffi::c_void;
-use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
 
-use block2::RcBlock;
+use maplibre_rust_ui::Phase;
+use maplibre_rust_ui::component::Press;
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PinchPhase, WheelDelta};
 use maplibre_rust_ui::util::geo::ScreenCoordinate;
-use maplibre_rust_ui::util::size::Size;
-use maplibre_rust_ui::{Phase, Viewport};
 use nsh_core::JsonValue;
 use nsh_platform_macos::{ComponentContext, Components, NativeComponent};
 use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NSView};
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSTimer};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
-use maplibre_rust_ui::component::{self, Component, Press};
-
 use crate::NAME;
+use crate::apple::Shared;
 
 /// Registers the map, `maplibre.map`, on `components`: the app calls it from
 /// its `#[native_components(macos)]` function, or before `run_app` through
@@ -37,60 +32,6 @@ pub fn register(components: &Components) {
     );
 }
 
-/// What the component and its view share: the map, the layer it renders
-/// into, and the timer that runs its frames while it wants them.
-struct Shared {
-    state: RefCell<Component>,
-    layer: Retained<CAMetalLayer>,
-    context: ComponentContext,
-    timer: RefCell<Option<Retained<NSTimer>>>,
-}
-
-impl Shared {
-    /// Runs frames until the map wants none.
-    fn wake(self: &Rc<Shared>) {
-        if self.timer.borrow().is_some() {
-            return;
-        }
-        let shared = Rc::downgrade(self);
-        let block = RcBlock::new(move |_: NonNull<NSTimer>| {
-            if let Some(shared) = shared.upgrade() {
-                shared.frame();
-            }
-        });
-        // SAFETY: the block takes the timer it is given, and the run loop,
-        // whose common modes keep it firing while a window resizes or a
-        // menu tracks, is the main thread's, where the view lives.
-        let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(1.0 / 60.0, true, &block) };
-        unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
-        *self.timer.borrow_mut() = Some(timer);
-    }
-
-    fn frame(&self) {
-        let layer = NonNull::from(&*self.layer).cast::<c_void>();
-        // SAFETY: the layer is a `CAMetalLayer`, which this keeps.
-        let (again, posts) =
-            self.state.borrow_mut().frame(|viewport| unsafe { component::metal_layer_target(layer, viewport) });
-        for post in posts {
-            self.context.emit(post.name, post.data);
-        }
-        if !again && let Some(timer) = self.timer.borrow_mut().take() {
-            timer.invalidate();
-        }
-    }
-
-    /// The view is `size` points at `scale` now.
-    fn resize(self: &Rc<Shared>, size: NSSize, scale: f64) {
-        self.layer.setContentsScale(scale);
-        let viewport = (size.width >= 1.0 && size.height >= 1.0).then(|| Viewport {
-            size: Size::new(size.width.round() as u32, size.height.round() as u32),
-            scale: scale as f32,
-        });
-        self.state.borrow_mut().resize(viewport);
-        self.wake();
-    }
-}
-
 struct MapComponent {
     view: Retained<MapView>,
     shared: Rc<Shared>,
@@ -98,10 +39,7 @@ struct MapComponent {
 
 impl MapComponent {
     fn new(context: ComponentContext, mtm: MainThreadMarker) -> MapComponent {
-        let layer = CAMetalLayer::new();
-        layer.setOpaque(true);
-        let shared =
-            Rc::new(Shared { state: RefCell::new(Component::new()), layer, context, timer: RefCell::new(None) });
+        let shared = Shared::new(CAMetalLayer::new(), move |name, data| context.emit(name, data));
         let view = MapView::alloc(mtm).set_ivars(Rc::downgrade(&shared));
         // SAFETY: NSView's designated initializer.
         let view: Retained<MapView> = unsafe { msg_send![super(view), initWithFrame: NSRect::ZERO] };
@@ -116,21 +54,17 @@ impl NativeComponent for MapComponent {
     }
 
     fn set_prop(&mut self, name: &str, value: Option<&JsonValue>) {
-        self.shared.state.borrow_mut().set_prop(name, value);
-        self.shared.wake();
+        self.shared.set_prop(name, value);
     }
 
     fn command(&mut self, name: &str, args: &JsonValue) {
-        self.shared.state.borrow_mut().command(name, args);
-        self.shared.wake();
+        self.shared.command(name, args);
     }
 }
 
 impl Drop for MapComponent {
     fn drop(&mut self) {
-        if let Some(timer) = self.shared.timer.borrow_mut().take() {
-            timer.invalidate();
-        }
+        self.shared.stop();
     }
 }
 
@@ -275,7 +209,8 @@ impl MapView {
     fn resized(&self) {
         let Some(shared) = self.ivars().upgrade() else { return };
         let scale = self.window().map_or(2.0, |window| window.backingScaleFactor());
-        shared.resize(self.frame().size, scale);
+        let size = self.frame().size;
+        shared.resize(size.width, size.height, scale);
     }
 
     /// Where `event` is, in points from the view's top-left corner.
@@ -287,15 +222,12 @@ impl MapView {
     fn press(&self, event: &NSEvent, phase: Phase, button: Button) {
         let Some(shared) = self.ivars().upgrade() else { return };
         let ScreenCoordinate { x, y } = self.position(event);
-        let press = Press { id: 0, phase, x, y, button, touch: false, modifiers: modifiers(event) };
-        shared.state.borrow_mut().pointer(&press);
-        shared.wake();
+        shared.press(&Press { id: 0, phase, x, y, button, touch: false, modifiers: modifiers(event) });
     }
 
     fn gesture(&self, input: Input) {
         let Some(shared) = self.ivars().upgrade() else { return };
-        shared.state.borrow_mut().gesture(input);
-        shared.wake();
+        shared.gesture(input);
     }
 }
 

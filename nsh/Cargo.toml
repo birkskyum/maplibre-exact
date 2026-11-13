@@ -14,10 +14,26 @@ maplibre-rust-ui = { path = "../core" }
 nsh-core = "0.5.0"
 serde_json = "1"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 block2 = "0.6.2"
-nsh-platform-macos = { version = "0.5.0", default-features = false }
 objc2 = "0.6.5"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "NSDate",
+    "NSEnumerator",
+    "NSGeometry",
+    "NSObjCRuntime",
+    "NSRunLoop",
+    "NSSet",
+    "NSString",
+    "NSTimer",
+] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.5.0", default-features = false }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "NSEvent",
@@ -27,14 +43,16 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSWindow",
     "objc2-quartz-core",
 ] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = [
+
+[target.'cfg(target_os = "ios")'.dependencies]
+nsh-platform-ios = { version = "0.5.0", default-features = false }
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "std",
-    "block2",
-    "NSDate",
-    "NSGeometry",
-    "NSObjCRuntime",
-    "NSRunLoop",
-    "NSString",
-    "NSTimer",
+    "UIEvent",
+    "UIResponder",
+    "UITouch",
+    "UITraitCollection",
+    "UIView",
+    "objc2-core-foundation",
+    "objc2-quartz-core",
 ] }
-objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }

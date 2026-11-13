@@ -5,3 +5,5 @@
 /whisker/target/
 /whisker/examples/hello-map/target/
 /whisker/examples/hello-map/gen/
+/nsh/examples/hello-map/.nsh/
+/nsh/examples/hello-map/target/

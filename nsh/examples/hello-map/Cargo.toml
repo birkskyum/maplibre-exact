@@ -13,7 +13,7 @@ nsh-core = "0.5.0"
 serde_json = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos = "0.5.0"
+nsh-platform-macos = { version = "0.5.0", default-features = false }
 # Only for HELLO_MAP_SNAPSHOTS, whose walk taps the map and saves the window.
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
@@ -26,3 +26,6 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSWindow",
 ] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+nsh-platform-ios = { version = "0.5.0", default-features = false }

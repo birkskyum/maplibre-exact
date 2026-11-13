@@ -198,7 +198,8 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 ## Where it runs
 
 - Slint and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
-  content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk.
+  content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk. Native
+  Shell on the iOS simulator too, without the tap.
 
 - Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
@@ -220,5 +221,5 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- The Slint and Native Shell hosts beyond macOS, and the Whisker host beyond iOS.
+- Slint beyond macOS, Native Shell and Whisker on Android, and Whisker on macOS.
 - MapLibre Native as the engine, through maplibre-native-ffi.

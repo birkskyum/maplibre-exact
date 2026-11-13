@@ -24,8 +24,8 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
 - [`slint`](slint) is `maplibre-slint`, the map in [Slint](https://slint.dev) apps, on Slint's wgpu
   renderer. It runs on macOS. [Its README](slint/README.md) says how to use it.
 - [`nsh`](nsh) is `maplibre-nsh`, the map in [Native Shell](https://nsh.dev) apps, as a native
-  component whose view the map renders into. It runs on macOS. [Its README](nsh/README.md) says how to
-  use it.
+  component whose view the map renders into. It runs on macOS and iOS. [Its README](nsh/README.md)
+  says how to use it.
 - [`whisker`](whisker) is `maplibre-whisker`, the map in [Whisker](https://whisker.rs) apps, as a
   Whisker module whose Swift view the map renders into. It runs on iOS. [Its README](whisker/README.md)
   says how to use it.

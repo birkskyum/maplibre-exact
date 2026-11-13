@@ -2,14 +2,34 @@
 //! names, with buttons that fly there, fit them in view and turn the globe on.
 //!
 //! With `HELLO_MAP_SNAPSHOTS=<folder>` the app takes a short walk on its own,
-//! saving the window as PNG files there, and quits.
+//! saving the window as PNG files there on macOS, and quits. With
+//! `HELLO_MAP_WALK` it takes the walk and says when it reaches each step.
 
-#[cfg(target_os = "macos")]
 mod walk;
 
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 use serde_json::{Value as Json, json};
+
+/// The app's UI set (`nsh.json` `"rust"`), whose root `nsh` mounts.
+#[native_module("hello-map/native")]
+fn native(registry: &mut Registry) {
+    registry.register::<App>();
+}
+
+/// The map, on the hosts `nsh run` and `nsh package` build for macOS.
+#[cfg(target_os = "macos")]
+#[native_components(macos)]
+fn components(components: &nsh_platform_macos::Components) {
+    maplibre_nsh::register(components);
+}
+
+/// The map, on the hosts `nsh run` and `nsh package` build for iOS.
+#[cfg(target_os = "ios")]
+#[native_components(ios)]
+fn components(components: &nsh_platform_ios::Components) {
+    maplibre_nsh::register(components);
+}
 
 const STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
@@ -84,10 +104,10 @@ pub fn App() -> impl IntoElement {
     let globe = signal(false);
     let status = signal(String::from("Tap a place"));
     let attribution = signal(String::new());
-    let walking = std::env::var_os("HELLO_MAP_SNAPSHOTS");
-    #[cfg(target_os = "macos")]
-    if let Some(folder) = walking.clone() {
-        walk::walk(map, status, folder.into());
+    let folder = std::env::var_os("HELLO_MAP_SNAPSHOTS");
+    let walking = folder.is_some() || std::env::var_os("HELLO_MAP_WALK").is_some();
+    if walking {
+        walk::walk(map, status, folder.map(Into::into));
     }
     view()
         .flex_1()
@@ -99,7 +119,7 @@ pub fn App() -> impl IntoElement {
                 .prop("camera", json!({"center": [10.45, 51.16], "zoom": 4}))
                 .prop("content", move || content(globe.get()))
                 // The walk's own taps are clicks; the person's pointer moves nothing.
-                .prop("options", json!({"interactive": walking.is_none()}))
+                .prop("options", json!({"interactive": !walking}))
                 .prop("events", json!(["load", "click", "error"]))
                 .on_native_event(move |event: &NativeEvent| {
                     match &*event.name {
@@ -113,14 +133,19 @@ pub fn App() -> impl IntoElement {
         )
         .child(
             view()
-                .flex_row()
-                .items_center()
                 .gap_2()
                 .p_3()
-                .child(action("Zürich", move || map.command("flyTo", fly_to_zurich())))
-                .child(action("Places", move || map.command("fitBounds", fit_places())))
-                .child(action("Globe", move || globe.update(|globe| *globe = !*globe)))
-                .child(text(move || status.get()).flex_1().text_color(move || theme().foreground))
-                .child(text(move || attribution.get()).text_color(move || theme().muted_foreground)),
+                .pb_safe_area_plus(px(12.0))
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(action("Zürich", move || map.command("flyTo", fly_to_zurich())))
+                        .child(action("Places", move || map.command("fitBounds", fit_places())))
+                        .child(action("Globe", move || globe.update(|globe| *globe = !*globe)))
+                        .child(text(move || status.get()).flex_1().text_color(move || theme().foreground)),
+                )
+                .child(text(move || attribution.get()).text_xs().text_color(move || theme().muted_foreground)),
         )
 }

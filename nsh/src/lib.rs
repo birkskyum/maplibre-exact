@@ -24,15 +24,22 @@
 //! menu with the content's features under them, the last failure and the
 //! style's attribution.
 //!
-//! On macOS the map renders into the view's Metal layer, on a thread of its
-//! own, and the view takes the mouse and the trackpad itself.
+//! On macOS and iOS the map renders into the view's Metal layer, on a thread
+//! of its own, and the view takes the mouse and the trackpad, or the
+//! touches, itself.
 
+#[cfg(target_vendor = "apple")]
+mod apple;
+#[cfg(target_os = "ios")]
+pub mod ios;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
 pub use maplibre_rust_ui::model;
 use nsh_core::prelude::*;
 
+#[cfg(target_os = "ios")]
+pub use crate::ios::register;
 #[cfg(target_os = "macos")]
 pub use crate::macos::register;
 
