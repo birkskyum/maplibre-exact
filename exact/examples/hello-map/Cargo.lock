@@ -1898,8 +1898,8 @@ version = "0.1.0"
 dependencies = [
  "exact-js",
  "exact-js-bake",
- "exact-linux",
  "exact-logic",
+ "exact-painted",
  "ibex2-sqlite",
 ]
 
@@ -2724,6 +2724,7 @@ dependencies = [
  "mln-rs-webgpu",
  "serde",
  "serde_json",
+ "wgpu 30.0.1",
 ]
 
 [[package]]

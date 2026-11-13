@@ -18,5 +18,5 @@ mod android {
     include!(concat!(env!("OUT_DIR"), "/logic.rs"));
     include!(concat!(env!("OUT_DIR"), "/hatches.rs"));
 
-    exact_linux::canvas_jni!(super::AppData, hatches = crate::android::exact_hatches());
+    exact_painted::canvas_jni!(super::AppData, hatches = crate::android::exact_hatches());
 }
