@@ -139,6 +139,12 @@ impl Component {
         }
     }
 
+    /// The view's size, once it has one.
+    #[must_use]
+    pub fn viewport(&self) -> Option<Viewport> {
+        self.viewport
+    }
+
     /// The view is `viewport` now, or has no area with `None`.
     pub fn resize(&mut self, viewport: Option<Viewport>) {
         self.viewport = viewport;
@@ -256,6 +262,40 @@ impl Component {
     fn now_ms(&self) -> f64 {
         self.epoch.elapsed().as_secs_f64() * 1000.0
     }
+}
+
+/// A target of the `CAMetalLayer` at `layer` for a map of `viewport`, which
+/// the map renders into on a thread of its own, on a device that every map
+/// of the app shares. Made on the main thread, where wgpu takes the layer.
+///
+/// # Safety
+///
+/// `layer` points to a live `CAMetalLayer`, which the surface retains.
+///
+/// # Errors
+///
+/// Why the device or the surface couldn't be made.
+#[cfg(target_vendor = "apple")]
+pub unsafe fn metal_layer_target(
+    layer: std::ptr::NonNull<std::ffi::c_void>,
+    viewport: Viewport,
+) -> Result<(RenderTarget, Driver), String> {
+    static DEVICE: std::sync::OnceLock<Result<mln_webgpu::Device, String>> = std::sync::OnceLock::new();
+    let device = DEVICE
+        .get_or_init(|| mln_webgpu::Device::new(None).map_err(|e| format!("maplibre: {}", e.message)))
+        .as_ref()
+        .map_err(Clone::clone)?;
+    let instance = device.instance().ok_or("maplibre: the device has no instance")?;
+    // SAFETY: the caller hands a live `CAMetalLayer`.
+    let surface =
+        unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer.as_ptr())) }
+            .map_err(|e| format!("maplibre: {e}"))?;
+    let target = RenderTarget::Surface {
+        size: viewport.size,
+        surface: mln_runtime::Surface::wgpu(surface),
+        device: Some(mln_runtime::Device::WebGpu(device.clone())),
+    };
+    Ok((target, Driver::CoreWorker))
 }
 
 /// The JSON text of a prop, which may be a document or a string of one.

@@ -6,14 +6,12 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
-use std::sync::OnceLock;
 
 use block2::RcBlock;
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PinchPhase, WheelDelta};
-use maplibre_rust_ui::runtime::{Device, Driver, RenderTarget, Surface};
 use maplibre_rust_ui::util::geo::ScreenCoordinate;
 use maplibre_rust_ui::util::size::Size;
-use maplibre_rust_ui::{Phase, Viewport, webgpu, wgpu};
+use maplibre_rust_ui::{Phase, Viewport};
 use nsh_core::JsonValue;
 use nsh_platform_macos::{ComponentContext, Components, NativeComponent};
 use objc2::rc::Retained;
@@ -22,7 +20,7 @@ use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NS
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSTimer};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
-use maplibre_rust_ui::component::{Component, Press};
+use maplibre_rust_ui::component::{self, Component, Press};
 
 use crate::NAME;
 
@@ -37,15 +35,6 @@ pub fn register(components: &Components) {
             Box::new(MapComponent::new(context, mtm))
         }),
     );
-}
-
-/// The device every map of the app renders on, made with the first.
-fn device() -> Result<&'static webgpu::Device, String> {
-    static DEVICE: OnceLock<Result<webgpu::Device, String>> = OnceLock::new();
-    DEVICE
-        .get_or_init(|| webgpu::Device::new(None).map_err(|e| format!("maplibre: {}", e.message)))
-        .as_ref()
-        .map_err(Clone::clone)
 }
 
 /// What the component and its view share: the map, the layer it renders
@@ -78,7 +67,10 @@ impl Shared {
     }
 
     fn frame(&self) {
-        let (again, posts) = self.state.borrow_mut().frame(|viewport| target(&self.layer, viewport));
+        let layer = NonNull::from(&*self.layer).cast::<c_void>();
+        // SAFETY: the layer is a `CAMetalLayer`, which this keeps.
+        let (again, posts) =
+            self.state.borrow_mut().frame(|viewport| unsafe { component::metal_layer_target(layer, viewport) });
         for post in posts {
             self.context.emit(post.name, post.data);
         }
@@ -97,22 +89,6 @@ impl Shared {
         self.state.borrow_mut().resize(viewport);
         self.wake();
     }
-}
-
-/// A surface of `layer` for a map of `viewport`, on the app's device, which
-/// the map renders into on a thread of its own.
-fn target(layer: &CAMetalLayer, viewport: Viewport) -> Result<(RenderTarget, Driver), String> {
-    let device = device()?;
-    let instance = device.instance().ok_or("maplibre: the device has no instance")?;
-    let layer = std::ptr::from_ref(layer).cast_mut().cast::<c_void>();
-    // SAFETY: the layer is a `CAMetalLayer`, which the surface retains.
-    let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer)) }
-        .map_err(|e| format!("maplibre: {e}"))?;
-    let device = Device::WebGpu(device.clone());
-    Ok((
-        RenderTarget::Surface { size: viewport.size, surface: Surface::wgpu(surface), device: Some(device) },
-        Driver::CoreWorker,
-    ))
 }
 
 struct MapComponent {
