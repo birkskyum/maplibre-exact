@@ -1,7 +1,7 @@
-From cea6fcb98f558cb0f0c3b2920e0dc760df8bbe17 Mon Sep 17 00:00:00 2001
+From f6912a2bd640250e4a8dfe87b24d3e17f18fddfd Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Fri, 13 Nov 2026 16:34:59 +0100
-Subject: [PATCH 2/2] Keep a frame's surface texture when the surface needs no
+Subject: [PATCH 2/3] Keep a frame's surface texture when the surface needs no
  reconfigure
 
 ---
@@ -9,7 +9,7 @@ Subject: [PATCH 2/2] Keep a frame's surface texture when the surface needs no
  1 file changed, 7 insertions(+), 4 deletions(-)
 
 diff --git a/crates/mln_webgpu/src/surface_target.rs b/crates/mln_webgpu/src/surface_target.rs
-index d72cf3ef..8fea4cce 100644
+index f3d8feba..f3a5280f 100644
 --- a/crates/mln_webgpu/src/surface_target.rs
 +++ b/crates/mln_webgpu/src/surface_target.rs
 @@ -299,9 +299,6 @@ impl SurfaceState {
@@ -28,9 +28,9 @@ index d72cf3ef..8fea4cce 100644
  
 -        // Skip if size hasn't changed and we're already configured
 +        // Skip if size hasn't changed and we're already configured. The
-+        // current texture stays for the frame to present: Vulkan gets no
-+        // acquired image back that is dropped unpresented, so a swapchain
-+        // that lost each of its images that way has none left to acquire.
++        // current texture stays for the frame to present, since Vulkan never
++        // gets back an acquired image that is dropped unpresented, and a
++        // swapchain that lost each of its images that way has none left.
          if self.surface_configured.get() && self.last_configured_size.get() == size {
              self.surface_needs_reconfigure.set(false);
              return;

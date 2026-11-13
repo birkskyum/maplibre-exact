@@ -197,6 +197,12 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
    drawing ("dequeueBuffer timed out"). The prototype keeps the texture for the frame to present
    ([`patches/mln-rs`](patches/mln-rs),
    [louwers/mln-rs#343](https://github.com/louwers/mln-rs/pull/343)).
+6. **The gesture recognizer's camera trait, events and options, public.** mln-rs keeps public only
+   what its own crates use, and its examples drive the recognizer with an `mln_map::Map` on their
+   thread. A host on the runtime has the map on the runtime's thread, so its camera reads the map's
+   snapshot and sends the recognizer's deltas as commands, which takes implementing `GestureCamera`
+   outside mln-rs. The prototype exports it again, with `GestureEvent`, `GestureOptions` and the
+   recognizer's `options` and `set_options` ([`patches/mln-rs`](patches/mln-rs)).
 
 Two needs are met. A host renders into its own textures with `BorrowedTarget`, on every mln-rs
 backend, and mln-rs trusts Android's system certificates when the app gives it no Java VM

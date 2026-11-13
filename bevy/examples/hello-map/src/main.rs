@@ -253,10 +253,10 @@ const STEPS: [(u64, Step); 8] = [
     (6100, Step::Command(fly_to_zurich)),
     (10000, Step::Snapshot("2-zurich")),
     (10100, Step::TapTheMiddle),
-    (11500, Step::Snapshot("3-tapped")),
-    (11600, Step::Command(fit_places)),
-    (14000, Step::Snapshot("4-places")),
-    (15000, Step::Quit),
+    (12500, Step::Snapshot("3-tapped")),
+    (12600, Step::Command(fit_places)),
+    (15000, Step::Snapshot("4-places")),
+    (16000, Step::Quit),
 ];
 
 fn walk(

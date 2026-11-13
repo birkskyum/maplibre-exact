@@ -40,12 +40,13 @@ mln-rs, such as MapLibre Native or GL JS on the web, can stand in behind it with
 
 ## Building
 
-The crates find mln-rs by path, as a checkout next to this repository (`../mln-rs`), at `55936891`
-with the patches in [`patches/mln-rs`](patches/mln-rs): Apple's own SQLite, and a fix that keeps a
-surface presenting on Vulkan after the map rests. The core builds and tests on its own:
+The crates find mln-rs by path, as a checkout next to this repository (`../mln-rs`), at `09ec095f`
+with the patches in [`patches/mln-rs`](patches/mln-rs): Apple's own SQLite, a fix that keeps a surface
+presenting on Vulkan after the map rests, and the gesture recognizer's camera trait, events and options
+exported again, which hosts on the runtime use. The core builds and tests on its own:
 
 ```sh
-git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-rust-ui 55936891
+git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-rust-ui 09ec095f
 git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
 cd maplibre-rust-ui/core && cargo test
 ```

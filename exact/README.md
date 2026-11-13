@@ -58,7 +58,7 @@ exact_gpu::module!(REGISTRY);
 
 Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches) and
 [`../patches/mln-rs`](../patches/mln-rs), on the commits this was last built on, Exact `09824dea` and
-mln-rs `55936891`.
+mln-rs `09ec095f`.
 
 - Exact gets five. Rust 1.99.1, since mln-rs needs 1.98, and ureq 3.5 and icu_locale 2.4, which
   mln-rs takes and Exact pins below ([expo/exact#426](https://github.com/expo/exact/issues/426)). Each
@@ -69,7 +69,7 @@ mln-rs `55936891`.
   and Exact's iOS build refuses an app that uses them without a reason in its privacy manifest.
 
 ```sh
-git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-exact 55936891
+git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-exact 09ec095f
 git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
 git clone https://github.com/expo/exact && git -C exact checkout -b maplibre-exact 09824dea
 git -C exact am ../maplibre-rust-ui/exact/patches/exact/*.patch
