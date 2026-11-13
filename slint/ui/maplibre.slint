@@ -1,0 +1,56 @@
+// A MapLibre map in a Slint UI. maplibre-slint's `SlintMap` draws the map
+// into `MapLibre.frame` and takes the input that `MapLibreMap` hands
+// `MapLibre`; the app connects the two (see `maplibre_slint::connect!`).
+
+export global MapLibre {
+    // The map's latest frame.
+    in-out property <image> frame;
+    // The map's size in logical pixels, which `MapLibreMap` keeps.
+    in-out property <length> width;
+    in-out property <length> height;
+    // A pointer: its kind (0 down, 1 up, 2 move, 3 cancel), its button (0
+    // the primary, 1 the middle, 2 the secondary), its finger (0 for a
+    // mouse), where it is, and the shift, control, alt and meta keys.
+    callback pointer(int, int, int, length, length, bool, bool, bool, bool);
+    // A wheel or trackpad scroll, by how much, where, and the same keys.
+    callback scroll(length, length, length, length, bool, bool, bool, bool);
+}
+
+// The map, filling the element. Controls over the map go inside it.
+export component MapLibreMap inherits Rectangle {
+    clip: true;
+    init => {
+        MapLibre.width = self.width;
+        MapLibre.height = self.height;
+    }
+    changed width => { MapLibre.width = self.width; }
+    changed height => { MapLibre.height = self.height; }
+
+    Image {
+        width: 100%;
+        height: 100%;
+        source: MapLibre.frame;
+        image-fit: fill;
+    }
+
+    TouchArea {
+        pointer-event(event) => {
+            MapLibre.pointer(
+                event.kind == PointerEventKind.down ? 0 : event.kind == PointerEventKind.up ? 1 : event.kind == PointerEventKind.move ? 2 : 3,
+                event.button == PointerEventButton.right ? 2 : event.button == PointerEventButton.middle ? 1 : 0,
+                event.touch-finger-id,
+                self.mouse-x,
+                self.mouse-y,
+                event.modifiers.shift,
+                event.modifiers.control,
+                event.modifiers.alt,
+                event.modifiers.meta);
+        }
+        scroll-event(event) => {
+            MapLibre.scroll(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y, event.modifiers.shift, event.modifiers.control, event.modifiers.alt, event.modifiers.meta);
+            accept
+        }
+    }
+
+    @children
+}

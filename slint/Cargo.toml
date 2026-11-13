@@ -1,0 +1,18 @@
+[package]
+name = "maplibre-slint"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps in Slint apps, drawn by mln-rs on Slint's wgpu renderer"
+publish = false
+# Gives the build scripts of the crates that depend on this one the path of
+# its Slint library, as `DEP_MAPLIBRE_SLINT_UI`.
+links = "maplibre-slint"
+build = "build.rs"
+
+[workspace]
+members = ["examples/hello-map"]
+
+[dependencies]
+maplibre-rust-ui = { path = "../core" }
+slint = { version = "1.18", features = ["unstable-wgpu-30", "renderer-femtovg-wgpu"] }

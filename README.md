@@ -21,9 +21,11 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
   Exact's GPU canvas. It runs on macOS, iOS and Android. [Its README](exact/README.md) says how to use
   it and run its example.
 
-Hosts for [Whisker](https://whisker.rs) and [Native Shell](https://nsh.dev) come next, and one for
-[Slint](https://slint.dev). Each host folder builds on the core alone, and becomes a repository of its
-own once the core's API settles.
+- [`slint`](slint) is `maplibre-slint`, the map in [Slint](https://slint.dev) apps, on Slint's wgpu
+  renderer. It runs on macOS. [Its README](slint/README.md) says how to use it.
+
+Hosts for [Whisker](https://whisker.rs) and [Native Shell](https://nsh.dev) come next. Each host folder
+builds on the core alone, and becomes a repository of its own once the core's API settles.
 
 ## Building
 

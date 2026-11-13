@@ -1,0 +1,68 @@
+import { MapLibre, MapLibreMap } from "@maplibre/maplibre.slint";
+import { Button } from "std-widgets.slint";
+
+export { MapLibre }
+
+export component App inherits Window {
+    title: "Hello Map";
+    preferred-width: 900px;
+    preferred-height: 700px;
+
+    in property <string> status: "Tap a place";
+    in property <string> attribution;
+    in property <bool> globe;
+    callback zurich();
+    callback places();
+    callback toggle-globe();
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: 6px;
+            spacing: 6px;
+            Text {
+                text: "Hello Map";
+                font-size: 20px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Zürich";
+                clicked => { root.zurich(); }
+            }
+            Button {
+                text: "Places";
+                clicked => { root.places(); }
+            }
+            Button {
+                text: "Globe";
+                checkable: true;
+                checked: root.globe;
+                clicked => { root.toggle-globe(); }
+            }
+        }
+
+        MapLibreMap {
+            vertical-stretch: 1;
+            Rectangle {
+                x: parent.width - self.width;
+                y: parent.height - self.height;
+                width: credit.preferred-width + 8px;
+                height: credit.preferred-height + 4px;
+                background: #ffffffcc;
+                credit := Text {
+                    text: root.attribution;
+                    font-size: 11px;
+                    color: #333;
+                }
+            }
+        }
+
+        Text {
+            text: root.status;
+            font-size: 15px;
+            height: 28px;
+            vertical-alignment: center;
+            x: 8px;
+        }
+    }
+}
