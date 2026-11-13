@@ -56,18 +56,22 @@ exact_gpu::module!(REGISTRY);
 
 ## Running the example
 
-Clone Exact and mln-rs next to this repository. mln-rs runs as it is, from `55936891` or later. Exact
-gets the five patches in [`patches/`](patches), on `09824dea`, the commit this was last built on:
+Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches), on the
+commits this was last built on, Exact `09824dea` and mln-rs `55936891`.
 
-- Rust 1.99.1, since mln-rs needs 1.98, and ureq 3.5 and icu_locale 2.4, which mln-rs takes and
-  Exact pins below ([expo/exact#426](https://github.com/expo/exact/issues/426)).
-- Each child of a canvas captured on the CPU on iOS, since the GPU capture gives markers blank or
-  wrong pixels ([expo/exact#425](https://github.com/expo/exact/issues/425)).
+- Exact gets five. Rust 1.99.1, since mln-rs needs 1.98, and ureq 3.5 and icu_locale 2.4, which
+  mln-rs takes and Exact pins below ([expo/exact#426](https://github.com/expo/exact/issues/426)). Each
+  child of a canvas captured on the CPU on iOS, since the GPU capture gives markers blank or wrong
+  pixels ([expo/exact#425](https://github.com/expo/exact/issues/425)).
+- mln-rs gets one, which links Apple's own SQLite on Apple's platforms. The copy mln-rs builds in uses
+  filesystem probes that Apple counts as disk-space APIs, and Exact's iOS build refuses an app that
+  uses them without a reason in its privacy manifest.
 
 ```sh
-git clone https://github.com/louwers/mln-rs
+git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-exact 55936891
+git -C mln-rs am ../maplibre-rust-ui/exact/patches/mln-rs/*.patch
 git clone https://github.com/expo/exact && git -C exact checkout -b maplibre-exact 09824dea
-git -C exact am ../maplibre-rust-ui/exact/patches/*.patch
+git -C exact am ../maplibre-rust-ui/exact/patches/exact/*.patch
 bun exact/scripts/exact.mjs setup
 ```
 
@@ -76,6 +80,6 @@ Then, from `maplibre-rust-ui/exact/examples/hello-map`:
 ```sh
 bun install --frozen-lockfile      # Exact's geolocation module, which the example uses
 bun exact.mjs mac --run
-bun exact.mjs ios --device --run   # on a connected iPhone, with a development profile for its bundle id
+bun exact.mjs ios --run            # an iOS Simulator; --device on a connected iPhone, with a development profile for its bundle id
 bun exact.mjs android --run        # on a connected Android phone
 ```

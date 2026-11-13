@@ -172,7 +172,12 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
 
 1. **A frame time in the runtime.** The engine sets the host's clock through `Map::with_core`, which
    reaches past the runtime's API.
-2. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
+2. **Apple's own SQLite on Apple's platforms.** The SQLite that mln-rs builds in probes filesystem types
+   with `statfs`, which Apple counts as a disk-space API whose use an app's privacy manifest must give a
+   reason for, and none of Apple's reasons fits. Exact's iOS build refuses such an app, so the
+   prototype links the system's SQLite there ([`exact/patches/mln-rs`](exact/patches/mln-rs)), as
+   Exact's own crates do.
+3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
 

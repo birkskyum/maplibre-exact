@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Fri, 13 Nov 2026 13:14:14 +0100
+Subject: [PATCH] Use the system SQLite on Apple's platforms
+
+---
+ Cargo.toml                    | 2 +-
+ crates/mln_storage/Cargo.toml | 6 ++++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 04cd618e..6354fa0f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -165,7 +165,7 @@ regex = { version = "1.13.1" }
+ # tile worker in another wasm instance (rc: the values behind their `Arc`s).
+ serde = { version = "1.0.229", features = ["derive", "rc"] }
+ # The same engine as the C++ core's vendored SQLite, built from source like it.
+-rusqlite = { version = "0.41.1", features = ["bundled"] }
++rusqlite = "0.41.1"
+ # preserve_order: objects keep their members in document order, which the
+ # style parser and the order of expression errors rely on.
+ # float_roundtrip: correctly rounded float parsing (the default parser can be
+diff --git a/crates/mln_storage/Cargo.toml b/crates/mln_storage/Cargo.toml
+index 7de68fc0..6c50b90d 100644
+--- a/crates/mln_storage/Cargo.toml
++++ b/crates/mln_storage/Cargo.toml
+@@ -38,6 +38,12 @@ default = ["sqlite"]
+ # C++ MainResourceLoader without them).
+ sqlite = ["dep:rusqlite"]
+ 
++# Apple's platforms come with SQLite, and an app that links its own copy uses
++# its filesystem probes, which Apple counts as disk-space APIs whose use an
++# app's privacy manifest must give a reason for. Elsewhere SQLite is built in.
++[target.'cfg(not(target_vendor = "apple"))'.dependencies]
++rusqlite = { workspace = true, optional = true, features = ["bundled"] }
++
+ # The HTTP transport: the platform's HTTP stack where it has one (NSURLSession
+ # on Apple platforms, the browser's fetch on wasm), else ureq, with the
+ # system's trust store.
+-- 
+2.56.0
+
