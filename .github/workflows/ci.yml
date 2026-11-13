@@ -1,0 +1,49 @@
+# Builds, lints and tests the core and each host against mln-rs at the
+# commit the hosts build on, with the patches in patches/mln-rs. Exact's host
+# builds only through Exact's own tooling, so it isn't here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MLN_RS: 09ec095fa4bd862973cd5c5b4e0f47099937434f
+  CARGO_TERM_COLOR: always
+
+jobs:
+  crate:
+    name: ${{ matrix.crate }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [core, slint, egui, bevy, nsh, whisker]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: maplibre-rust-ui
+      - uses: actions/checkout@v7
+        with:
+          repository: louwers/mln-rs
+          ref: ${{ env.MLN_RS }}
+          path: mln-rs
+      - name: Apply the mln-rs patches
+        run: git -C mln-rs -c user.name=ci -c user.email=ci@localhost am ../maplibre-rust-ui/patches/mln-rs/*.patch
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: maplibre-rust-ui/${{ matrix.crate }}
+      - name: Format
+        working-directory: maplibre-rust-ui/${{ matrix.crate }}
+        run: cargo fmt --all --check
+      - name: Lint
+        working-directory: maplibre-rust-ui/${{ matrix.crate }}
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        working-directory: maplibre-rust-ui/${{ matrix.crate }}
+        run: cargo test --workspace

@@ -11,11 +11,11 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::NonNull;
 
 use maplibre_rust_ui::component::{Component, Press};
-use maplibre_rust_ui::runtime::{Driver, RenderTarget};
-use maplibre_rust_ui::{Phase, Viewport};
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PinchPhase, WheelDelta};
+use maplibre_rust_ui::runtime::{Driver, RenderTarget};
 use maplibre_rust_ui::util::geo::ScreenCoordinate;
 use maplibre_rust_ui::util::size::Size;
+use maplibre_rust_ui::{Phase, Viewport};
 use serde_json::{Value as Json, json};
 
 /// What wakes a Swift view's frames: a function and the view it is given.
