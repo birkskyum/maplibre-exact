@@ -298,6 +298,81 @@ pub unsafe fn metal_layer_target(
     Ok((target, Driver::CoreWorker))
 }
 
+/// A target of the Android `ANativeWindow` at `window` for a map of
+/// `viewport`, which the map renders into on a thread of its own and holds
+/// a reference to while it does.
+///
+/// # Safety
+///
+/// `window` points to a live `ANativeWindow`.
+#[cfg(target_os = "android")]
+pub unsafe fn android_window_target(
+    window: std::ptr::NonNull<std::ffi::c_void>,
+    viewport: Viewport,
+) -> Result<(RenderTarget, Driver), String> {
+    // SAFETY: the caller hands a live window, which the target holds.
+    let window = unsafe { android::Window::acquire(window) };
+    let target = RenderTarget::Surface { size: viewport.size, surface: mln_runtime::Surface::window(window), device: None };
+    Ok((target, Driver::CoreWorker))
+}
+
+#[cfg(target_os = "android")]
+mod android {
+    use std::ffi::c_void;
+    use std::ptr::NonNull;
+
+    use raw_window_handle::{
+        AndroidNdkWindowHandle, DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle,
+        WindowHandle,
+    };
+
+    #[link(name = "android")]
+    unsafe extern "C" {
+        fn ANativeWindow_acquire(window: *mut c_void);
+        fn ANativeWindow_release(window: *mut c_void);
+    }
+
+    /// A reference to an `ANativeWindow`, which any thread may use.
+    pub(super) struct Window(NonNull<c_void>);
+
+    // SAFETY: an `ANativeWindow` is reference counted and thread safe.
+    unsafe impl Send for Window {}
+    // SAFETY: as above.
+    unsafe impl Sync for Window {}
+
+    impl Window {
+        /// # Safety
+        ///
+        /// `window` points to a live `ANativeWindow`.
+        pub(super) unsafe fn acquire(window: NonNull<c_void>) -> Window {
+            // SAFETY: the caller hands a live window.
+            unsafe { ANativeWindow_acquire(window.as_ptr()) };
+            Window(window)
+        }
+    }
+
+    impl Drop for Window {
+        fn drop(&mut self) {
+            // SAFETY: the reference `acquire` took.
+            unsafe { ANativeWindow_release(self.0.as_ptr()) };
+        }
+    }
+
+    impl HasWindowHandle for Window {
+        fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+            let raw = RawWindowHandle::AndroidNdk(AndroidNdkWindowHandle::new(self.0));
+            // SAFETY: the window lives while this holds it.
+            Ok(unsafe { WindowHandle::borrow_raw(raw) })
+        }
+    }
+
+    impl HasDisplayHandle for Window {
+        fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+            Ok(DisplayHandle::android())
+        }
+    }
+}
+
 /// The JSON text of a prop, which may be a document or a string of one.
 fn text(value: Option<&Json>) -> String {
     match value {

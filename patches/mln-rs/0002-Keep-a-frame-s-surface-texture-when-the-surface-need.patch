@@ -1,0 +1,49 @@
+From cea6fcb98f558cb0f0c3b2920e0dc760df8bbe17 Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Fri, 13 Nov 2026 16:34:59 +0100
+Subject: [PATCH 2/2] Keep a frame's surface texture when the surface needs no
+ reconfigure
+
+---
+ crates/mln_webgpu/src/surface_target.rs | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/crates/mln_webgpu/src/surface_target.rs b/crates/mln_webgpu/src/surface_target.rs
+index d72cf3ef..8fea4cce 100644
+--- a/crates/mln_webgpu/src/surface_target.rs
++++ b/crates/mln_webgpu/src/surface_target.rs
+@@ -299,9 +299,6 @@ impl SurfaceState {
+     fn reconfigure_surface(&self) {
+         // Wait for any in-progress frame: never in progress (file comment).
+ 
+-        // Clear all texture state
+-        self.current.borrow_mut().take();
+-
+         let surface = self.surface.borrow();
+         let Some(surface) = surface.as_ref() else {
+             return;
+@@ -310,7 +307,10 @@ impl SurfaceState {
+         // Get current size
+         let size = self.framebuffer_size.get();
+ 
+-        // Skip if size hasn't changed and we're already configured
++        // Skip if size hasn't changed and we're already configured. The
++        // current texture stays for the frame to present: Vulkan gets no
++        // acquired image back that is dropped unpresented, so a swapchain
++        // that lost each of its images that way has none left to acquire.
+         if self.surface_configured.get() && self.last_configured_size.get() == size {
+             self.surface_needs_reconfigure.set(false);
+             return;
+@@ -322,6 +322,9 @@ impl SurfaceState {
+             return;
+         }
+ 
++        // Clear all texture state
++        self.current.borrow_mut().take();
++
+         surface.configure(&self.device, &self.configuration(size));
+ 
+         self.create_depth_stencil_texture(size.width, size.height);
+-- 
+2.56.0
+

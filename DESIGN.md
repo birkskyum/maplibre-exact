@@ -180,8 +180,8 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
 2. **Apple's own SQLite on Apple's platforms.** The SQLite that mln-rs builds in probes filesystem types
    with `statfs`, which Apple counts as a disk-space API whose use an app's privacy manifest must give a
    reason for, and none of Apple's reasons fits. Exact's iOS build refuses such an app, so the
-   prototype links the system's SQLite there ([`exact/patches/mln-rs`](exact/patches/mln-rs)), as
-   Exact's own crates do.
+   prototype links the system's SQLite there ([`patches/mln-rs`](patches/mln-rs)), as Exact's own
+   crates do.
 3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
@@ -190,6 +190,12 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
    session on `Driver::CoreWorker` given `Surface::window` of an `NSView` panics ("can only access
    NSView on the main thread"). Native Shell's host makes the wgpu surface from the view's layer
    itself, on the main thread, and hands it over with `Surface::wgpu`.
+5. **A surface that keeps presenting on Vulkan after the map rests.** After ten seconds without a
+   frame, the WebGPU surface asks to be reconfigured, and with its size unchanged it dropped the
+   frame's acquired texture unpresented. Metal takes such a drawable back, and Vulkan doesn't, so on
+   Android each rest of the map cost the swapchain an image, until none was left and the map stopped
+   drawing ("dequeueBuffer timed out"). The prototype keeps the texture for the frame to present
+   ([`patches/mln-rs`](patches/mln-rs)), which a change upstream could take as it is.
 
 Two needs are met. A host renders into its own textures with `BorrowedTarget`, on every mln-rs
 backend, and mln-rs trusts Android's system certificates when the app gives it no Java VM
@@ -199,7 +205,9 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 
 - Slint and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
   content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk. Native
-  Shell on the iOS simulator too, without the tap.
+  Shell on the iOS simulator too, without the tap. Whisker on an Android 15 emulator, with the
+  emulator's own touches: the buttons, a tap naming a place and a drag, with pauses past the
+  surface's ten seconds between them.
 
 - Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
@@ -221,5 +229,5 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- Slint beyond macOS, Native Shell and Whisker on Android, and Whisker on macOS.
+- Slint beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an Android phone.
 - MapLibre Native as the engine, through maplibre-native-ffi.

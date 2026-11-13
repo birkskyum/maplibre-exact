@@ -1,13 +1,16 @@
 # maplibre-whisker
 
 MapLibre maps in [Whisker](https://whisker.rs) apps, drawn by mln-rs through
-[maplibre-rust-ui](../README.md)'s engine into a native view of their own. It runs on iOS so far.
+[maplibre-rust-ui](../README.md)'s engine into a native view of their own. It runs on iOS and
+Android.
 
-The crate is a Whisker module. Its Rust side declares the element, `Map`, and its Swift package
-([`apple`](apple)) is the view on iOS and macOS, whose
-layer is a `CAMetalLayer` that the map renders into on a thread of its own. The view hands the map its
-props, size, touches, mouse and trackpad through the crate's C functions ([`ffi.rs`](src/ffi.rs)),
-runs its frames on a display link while the map wants them, and posts the events each frame returns.
+The crate is a Whisker module. Its Rust side declares the element, `Map`. Its Swift package
+([`apple`](apple)) is the view on iOS and macOS, whose layer is a `CAMetalLayer`, and its Gradle
+project ([`android`](android)) the view on Android, a `SurfaceView`. The map renders into either on a
+thread of its own. The view hands the map its props, size, touches, mouse and trackpad through the
+crate's C functions ([`ffi.rs`](src/ffi.rs)) or JNI functions ([`android.rs`](src/android.rs)), runs
+its frames on a display link or the choreographer while the map wants them, and posts the events each
+frame returns.
 
 The app declares the map in its props, as maplibre-rust-ui models it ([`model.rs`](../core/src/model.rs)):
 
@@ -46,6 +49,7 @@ as the core does, and Whisker's CLI.
 ```sh
 cd examples/hello-map
 whisker run ios
+whisker run android     # with ANDROID_SERIAL naming the device when several are connected
 ```
 
 With `HELLO_MAP_WALK` set, the app takes a short walk on its own, which taps the map through the same
@@ -56,5 +60,6 @@ C function as the view's touches: on a simulator,
 
 - macOS. The view has its AppKit side, with the mouse and the trackpad, but it is unchecked:
   Whisker's macOS app takes the front of the screen when it starts.
-- Android, where the view is Kotlin and hands its `Surface` to Rust over JNI.
+- A surface that Android takes away, as when the app goes to the background, isn't given back to the
+  map yet.
 - Markers and the content's `images`.

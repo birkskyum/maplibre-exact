@@ -56,20 +56,21 @@ exact_gpu::module!(REGISTRY);
 
 ## Running the example
 
-Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches), on the
-commits this was last built on, Exact `09824dea` and mln-rs `55936891`.
+Clone Exact and mln-rs next to this repository and apply the patches in [`patches/`](patches) and
+[`../patches/mln-rs`](../patches/mln-rs), on the commits this was last built on, Exact `09824dea` and
+mln-rs `55936891`.
 
 - Exact gets five. Rust 1.99.1, since mln-rs needs 1.98, and ureq 3.5 and icu_locale 2.4, which
   mln-rs takes and Exact pins below ([expo/exact#426](https://github.com/expo/exact/issues/426)). Each
   child of a canvas captured on the CPU on iOS, since the GPU capture gives markers blank or wrong
   pixels ([expo/exact#425](https://github.com/expo/exact/issues/425)).
-- mln-rs gets one, which links Apple's own SQLite on Apple's platforms. The copy mln-rs builds in uses
-  filesystem probes that Apple counts as disk-space APIs, and Exact's iOS build refuses an app that
-  uses them without a reason in its privacy manifest.
+- mln-rs gets the patches every host takes, the first of which links Apple's own SQLite on Apple's
+  platforms. The copy mln-rs builds in uses filesystem probes that Apple counts as disk-space APIs,
+  and Exact's iOS build refuses an app that uses them without a reason in its privacy manifest.
 
 ```sh
 git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-exact 55936891
-git -C mln-rs am ../maplibre-rust-ui/exact/patches/mln-rs/*.patch
+git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
 git clone https://github.com/expo/exact && git -C exact checkout -b maplibre-exact 09824dea
 git -C exact am ../maplibre-rust-ui/exact/patches/exact/*.patch
 bun exact/scripts/exact.mjs setup

@@ -3,27 +3,93 @@
 //! runs its frames while it wants them, and drops it. Each map has the id
 //! [`maplibre_whisker_new`] returned, and an unknown id does nothing. A map
 //! wakes its view when it wants frames again, whoever handed it something.
+//! The Kotlin view on Android reaches the same maps through JNI.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::NonNull;
 
-use maplibre_rust_ui::Phase;
-use maplibre_rust_ui::Viewport;
 use maplibre_rust_ui::component::{Component, Press};
+use maplibre_rust_ui::runtime::{Driver, RenderTarget};
+use maplibre_rust_ui::{Phase, Viewport};
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PinchPhase, WheelDelta};
 use maplibre_rust_ui::util::geo::ScreenCoordinate;
 use maplibre_rust_ui::util::size::Size;
 use serde_json::{Value as Json, json};
 
-/// What wakes a view's frames: a function and the view it is given.
+/// What wakes a Swift view's frames: a function and the view it is given.
 pub type Wake = extern "C" fn(*mut c_void);
+
+/// A view's `CAMetalLayer` or `ANativeWindow`, and what lets go of it.
+pub(crate) type ViewSurface = (NonNull<c_void>, fn(NonNull<c_void>));
 
 struct Map {
     component: Component,
-    layer: NonNull<c_void>,
-    wake: Option<(Wake, *mut c_void)>,
+    surface: Option<ViewSurface>,
+    wake: Option<Box<dyn Fn()>>,
+}
+
+impl Drop for Map {
+    fn drop(&mut self) {
+        if let Some((surface, release)) = self.surface.take() {
+            release(surface);
+        }
+    }
+}
+
+/// A target of the view's surface, which the map renders into.
+fn target(surface: Option<NonNull<c_void>>, viewport: Viewport) -> Result<(RenderTarget, Driver), String> {
+    let surface = surface.ok_or_else(|| "maplibre: the view has no surface".to_owned())?;
+    #[cfg(target_vendor = "apple")]
+    // SAFETY: the view keeps its `CAMetalLayer` while the map lives.
+    return unsafe { maplibre_rust_ui::component::metal_layer_target(surface, viewport) };
+    #[cfg(target_os = "android")]
+    // SAFETY: the map holds a reference to the window.
+    return unsafe { maplibre_rust_ui::component::android_window_target(surface, viewport) };
+    #[cfg(not(any(target_vendor = "apple", target_os = "android")))]
+    {
+        let _ = (surface, viewport);
+        Err("maplibre: no native view on this platform".to_owned())
+    }
+}
+
+/// A map, whose view wakes its frames with `wake`. Returns its id.
+pub(crate) fn insert(wake: Option<Box<dyn Fn()>>) -> u64 {
+    let id = NEXT.with(|next| next.replace(next.get() + 1));
+    MAPS.with(|maps| maps.borrow_mut().insert(id, Map { component: Component::new(), surface: None, wake }));
+    id
+}
+
+/// The map's view has `surface` now, which `release` lets go of, or none.
+pub(crate) fn set_surface(map: u64, surface: Option<ViewSurface>) {
+    let old = with_map(map, |map| std::mem::replace(&mut map.surface, surface));
+    if let Some(Some((surface, release))) = old {
+        release(surface);
+    }
+}
+
+/// Runs a frame of the map. Returns whether it wants another, and the events
+/// to post, `[{"name": "load", "record": "{…}"}, …]` with each record as JSON
+/// text, or none.
+pub(crate) fn frame(map: u64) -> (bool, Option<String>) {
+    let framed = with_map(map, |map| {
+        let surface = map.surface.map(|(surface, _)| surface);
+        map.component.frame(|viewport| target(surface, viewport))
+    });
+    let (again, posts) = framed.unwrap_or_default();
+    if posts.is_empty() {
+        return (again, None);
+    }
+    let posts: Vec<Json> = posts
+        .into_iter()
+        .map(|post| {
+            // Whisker keeps `click` for its own gesture.
+            let name = if post.name == "click" { "map_click" } else { post.name };
+            json!({"name": name, "record": post.data.to_string()})
+        })
+        .collect();
+    (again, Some(Json::from(posts).to_string()))
 }
 
 thread_local! {
@@ -37,12 +103,14 @@ fn with_map<T>(map: u64, f: impl FnOnce(&mut Map) -> T) -> Option<T> {
 
 /// Hands the map something, then wakes its view's frames.
 fn hand(map: u64, f: impl FnOnce(&mut Component)) {
+    // The view runs its frames when woken, outside the maps' borrow.
     let wake = with_map(map, |map| {
         f(&mut map.component);
-        map.wake
+        map.wake.take()
     });
-    if let Some(Some((wake, view))) = wake {
-        wake(view);
+    if let Some(Some(wake)) = wake {
+        wake();
+        with_map(map, |map| map.wake = Some(wake));
     }
 }
 
@@ -81,9 +149,9 @@ fn modifiers(bits: u32) -> Modifiers {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_whisker_new(layer: *mut c_void, wake: Option<Wake>, view: *mut c_void) -> u64 {
     let Some(layer) = NonNull::new(layer) else { return 0 };
-    let id = NEXT.with(|next| next.replace(next.get() + 1));
-    let map = Map { component: Component::new(), layer, wake: wake.map(|wake| (wake, view)) };
-    MAPS.with(|maps| maps.borrow_mut().insert(id, map));
+    let view = view as usize;
+    let id = insert(wake.map(|wake| Box::new(move || wake(view as *mut c_void)) as Box<dyn Fn()>));
+    set_surface(id, Some((layer, |_| {})));
     id
 }
 
@@ -203,28 +271,12 @@ pub extern "C" fn maplibre_whisker_pinch(map: u64, x: f64, y: f64, scale: f64, r
 /// `again` is null or points to a `bool`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn maplibre_whisker_frame(map: u64, again: *mut bool) -> *mut c_char {
-    let framed = with_map(map, |map| {
-        let layer = map.layer;
-        // SAFETY: the view keeps its `CAMetalLayer` while the map lives.
-        map.component.frame(|viewport| unsafe { maplibre_rust_ui::component::metal_layer_target(layer, viewport) })
-    });
-    let (wants, posts) = framed.unwrap_or_default();
+    let (wants, posts) = frame(map);
     if !again.is_null() {
         // SAFETY: the caller hands a `bool`.
         unsafe { *again = wants };
     }
-    if posts.is_empty() {
-        return std::ptr::null_mut();
-    }
-    let posts: Vec<Json> = posts
-        .into_iter()
-        .map(|post| {
-            // Whisker keeps `click` for its own gesture.
-            let name = if post.name == "click" { "map_click" } else { post.name };
-            json!({"name": name, "record": post.data.to_string()})
-        })
-        .collect();
-    CString::new(Json::from(posts).to_string()).map_or(std::ptr::null_mut(), CString::into_raw)
+    posts.and_then(|posts| CString::new(posts).ok()).map_or(std::ptr::null_mut(), CString::into_raw)
 }
 
 /// Frees what [`maplibre_whisker_frame`] returned.

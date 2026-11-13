@@ -3288,6 +3288,7 @@ dependencies = [
  "mln-rs-style",
  "mln-rs-util",
  "mln-rs-webgpu",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "wgpu",

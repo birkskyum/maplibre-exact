@@ -29,8 +29,12 @@
 //! On iOS and macOS the map's view is Swift, in this crate's package, whose
 //! layer is a `CAMetalLayer` that the map renders into on a thread of its
 //! own. The view hands the map its props, size and input through the C
-//! functions in [`ffi`], and runs its frames.
+//! functions in [`ffi`], and runs its frames. On Android the view is Kotlin,
+//! a `SurfaceView` whose `Surface` the map renders into, and does the same
+//! through JNI.
 
+#[cfg(target_os = "android")]
+mod android;
 pub mod ffi;
 
 use std::rc::Rc;

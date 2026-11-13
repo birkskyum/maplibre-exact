@@ -27,18 +27,20 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
   component whose view the map renders into. It runs on macOS and iOS. [Its README](nsh/README.md)
   says how to use it.
 - [`whisker`](whisker) is `maplibre-whisker`, the map in [Whisker](https://whisker.rs) apps, as a
-  Whisker module whose Swift view the map renders into. It runs on iOS. [Its README](whisker/README.md)
-  says how to use it.
+  Whisker module whose Swift or Kotlin view the map renders into. It runs on iOS and Android.
+  [Its README](whisker/README.md) says how to use it.
 
 Each host folder builds on the core alone, and becomes a repository of its own once the core's API
 settles.
 
 ## Building
 
-The crates find mln-rs by path, as a checkout next to this repository (`../mln-rs`), at `55936891` or
-later. The core builds and tests on its own:
+The crates find mln-rs by path, as a checkout next to this repository (`../mln-rs`), at `55936891`
+with the patches in [`patches/mln-rs`](patches/mln-rs): Apple's own SQLite, and a fix that keeps a
+surface presenting on Vulkan after the map rests. The core builds and tests on its own:
 
 ```sh
-git clone https://github.com/louwers/mln-rs
+git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-rust-ui 55936891
+git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
 cd maplibre-rust-ui/core && cargo test
 ```

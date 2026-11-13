@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 description = "MapLibre maps in Whisker apps, drawn by mln-rs into a native view"
 publish = false
-include = ["Cargo.toml", "src/**/*.rs", "apple/Package.swift", "apple/**/*.swift"]
+include = ["Cargo.toml", "src/**/*.rs", "apple/Package.swift", "apple/**/*.swift", "android/build.gradle.kts", "android/**/*.kt"]
 
 [workspace]
 members = ["examples/hello-map"]
@@ -13,9 +13,10 @@ members = ["examples/hello-map"]
 [lib]
 crate-type = ["rlib"]
 
-# The Swift package of the map's view, which Whisker's build adds to the
-# app's iOS and macOS projects.
+# The map's view: a Swift package, which Whisker's build adds to the app's
+# iOS and macOS projects, and a Gradle project for its Android one.
 [package.metadata.whisker.module.platforms]
+android = { manifest = "android/build.gradle.kts" }
 ios = { manifest = "apple/Package.swift" }
 macos = { manifest = "apple/Package.swift" }
 
@@ -24,3 +25,6 @@ maplibre-rust-ui = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 whisker = "0.18.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
