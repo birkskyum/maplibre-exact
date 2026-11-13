@@ -214,8 +214,8 @@ Five needs are met.
   content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk. Native
   Shell on the iOS simulator too, without the tap. Whisker on an Android 15 emulator, with the
   emulator's own touches: the buttons, a tap naming a place and a drag, with pauses past the
-  surface's ten seconds between them. The station's callout in egui, Bevy and Whisker, and on
-  Whisker's iOS and Android also turned and tilted with the map.
+  surface's ten seconds between them. The station's callout in egui, Bevy, Whisker and Native Shell
+  (on iOS), and on Whisker's iOS and Android also turned and tilted with the map.
 
 - Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the

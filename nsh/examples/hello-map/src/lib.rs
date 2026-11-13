@@ -1,5 +1,6 @@
 //! Hello Map in Native Shell: a map of a few places in Zürich, which a tap
-//! names, with buttons that fly there, fit them in view and turn the globe on.
+//! names, with buttons that fly there, fit them in view and turn the globe on,
+//! and a callout over the station.
 //!
 //! With `HELLO_MAP_SNAPSHOTS=<folder>` the app takes a short walk on its own,
 //! saving the window as PNG files there on macOS, and quits. With
@@ -7,6 +8,7 @@
 
 mod walk;
 
+use maplibre_nsh::{MarkerPlace, at_marker};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 use serde_json::{Value as Json, json};
@@ -60,7 +62,8 @@ fn content(globe: bool) -> Json {
                 "text-anchor": "top", "text-offset": [0, 0.9]},
              "paint": {"text-color": "#1d2b4f", "text-halo-color": "#ffffff", "text-halo-width": 1.5}}
         ],
-        "hitPadding": 6
+        "hitPadding": 6,
+        "markers": {"station": {"lngLat": PLACES[2].1, "anchor": "bottom", "offset": [0, -14]}}
     });
     if globe {
         content["projection"] = json!({"type": "globe"});
@@ -104,6 +107,7 @@ pub fn App() -> impl IntoElement {
     let globe = signal(false);
     let status = signal(String::from("Tap a place"));
     let attribution = signal(String::new());
+    let station = signal(MarkerPlace { hidden: true, ..MarkerPlace::default() });
     let folder = std::env::var_os("HELLO_MAP_SNAPSHOTS");
     let walking = folder.is_some() || std::env::var_os("HELLO_MAP_WALK").is_some();
     if walking {
@@ -113,23 +117,40 @@ pub fn App() -> impl IntoElement {
         .flex_1()
         .bg(move || theme().background)
         .child(
-            maplibre_nsh::map()
-                .element_ref(&map)
-                .prop("style", Json::from(STYLE))
-                .prop("camera", json!({"center": [10.45, 51.16], "zoom": 4}))
-                .prop("content", move || content(globe.get()))
-                // The walk's own taps are clicks; the person's pointer moves nothing.
-                .prop("options", json!({"interactive": !walking}))
-                .prop("events", json!(["load", "click", "error"]))
-                .on_native_event(move |event: &NativeEvent| {
-                    match &*event.name {
-                        "click" => status.set(place(&event.data).unwrap_or_else(|| "Tap a place".to_owned())),
-                        "error" => status.set(event.data["failure"].as_str().unwrap_or_default().to_owned()),
-                        _ => {}
-                    }
-                    attribution.set(event.data["attribution"].as_str().unwrap_or_default().to_owned());
-                })
-                .flex_1(),
+            view()
+                .flex_1()
+                .child(
+                    maplibre_nsh::map()
+                        .element_ref(&map)
+                        .prop("style", Json::from(STYLE))
+                        .prop("camera", json!({"center": [10.45, 51.16], "zoom": 4}))
+                        .prop("content", move || content(globe.get()))
+                        // The walk's own taps are clicks; the person's pointer moves nothing.
+                        .prop("options", json!({"interactive": !walking}))
+                        .prop("events", json!(["load", "click", "error"]))
+                        .on_native_event(move |event: &NativeEvent| {
+                            match &*event.name {
+                                "markers" => {
+                                    station.set(MarkerPlace::of(&event.data, "station").unwrap_or_default());
+                                    return;
+                                }
+                                "click" => status.set(place(&event.data).unwrap_or_else(|| "Tap a place".to_owned())),
+                                "error" => status.set(event.data["failure"].as_str().unwrap_or_default().to_owned()),
+                                _ => {}
+                            }
+                            attribution.set(event.data["attribution"].as_str().unwrap_or_default().to_owned());
+                        })
+                        .flex_1(),
+                )
+                .child(at_marker(
+                    view()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(6.0))
+                        .bg(move || theme().background)
+                        .child(text("Trains").text_sm().text_color(move || theme().foreground)),
+                    station,
+                )),
         )
         .child(
             view()

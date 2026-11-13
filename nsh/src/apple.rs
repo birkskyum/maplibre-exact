@@ -16,6 +16,7 @@ use nsh_core::JsonValue;
 use objc2::rc::Retained;
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes, NSTimer};
 use objc2_quartz_core::CAMetalLayer;
+use serde_json::json;
 
 /// Posts an event to the app, by its name, with its data.
 type Emit = Box<dyn Fn(&str, JsonValue)>;
@@ -25,6 +26,8 @@ pub(crate) struct Shared {
     pub layer: Retained<CAMetalLayer>,
     emit: Emit,
     timer: RefCell<Option<Retained<NSTimer>>>,
+    /// The places of the content's markers the app last heard of.
+    places: RefCell<Option<JsonValue>>,
 }
 
 impl Shared {
@@ -35,6 +38,7 @@ impl Shared {
             layer,
             emit: Box::new(emit),
             timer: RefCell::new(None),
+            places: RefCell::new(None),
         })
     }
 
@@ -96,6 +100,13 @@ impl Shared {
         for post in posts {
             (self.emit)(post.name, post.data);
         }
+        let places = places(&self.state.borrow());
+        if places != *self.places.borrow() {
+            if let Some(places) = &places {
+                (self.emit)("markers", places.clone());
+            }
+            *self.places.borrow_mut() = places;
+        }
         if !again {
             self.stop();
         }
@@ -107,4 +118,29 @@ impl Shared {
             timer.invalidate();
         }
     }
+}
+
+/// Where the content's markers at places go, by their names, on the map as
+/// its last frame drew it: the point each marker's anchor goes to, its anchor
+/// as fractions of the view, the degrees it turns clockwise and how much it
+/// squashes as it lies on the map. None while the content has no markers.
+fn places(state: &Component) -> Option<JsonValue> {
+    let markers = state.markers();
+    if markers.is_empty() {
+        return None;
+    }
+    let mut places = serde_json::Map::new();
+    for marker in markers.iter().filter(|marker| marker.lng_lat.is_some()) {
+        let [ax, ay] = marker.anchor.fraction();
+        // A view of no size: the translation is where the anchor goes.
+        let place = match state.place(marker, [0.0; 4]) {
+            Some(placement) if !placement.hidden => {
+                let [a, b, x, c, d, y, ..] = placement.homography;
+                json!({"x": x, "y": y, "anchor": [ax, ay], "rotate": (-b).atan2(a).to_degrees(), "squash": a * d - b * c})
+            }
+            _ => json!({"hidden": true, "anchor": [ax, ay]}),
+        };
+        places.insert(marker.id.clone(), place);
+    }
+    Some(JsonValue::Object(places))
 }

@@ -55,14 +55,35 @@ Commands go through the element's ref, with GL JS's camera options:
 map.command("flyTo", json!({"center": [8.54, 47.37], "zoom": 14}));
 ```
 
+Native Shell's native views hold no children, so a marker is a view of the app's own over the map.
+While the content has markers, the map posts `markers` after each frame that moved one, whatever
+`events` names, with where each marker at a place goes. `at_marker` holds a view there, absolutely
+positioned in the map's parent, which the map fills, with its anchor on the point:
+
+```rust
+// in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+let station = signal(MarkerPlace::default());
+view().flex_1()
+    .child(maplibre_nsh::map().on_native_event(move |event: &NativeEvent| {
+        if event.name.as_ref() == "markers" {
+            station.set(MarkerPlace::of(&event.data, "station").unwrap_or_default());
+        }
+    }).flex_1())
+    .child(at_marker(view().child(text("Trains")), station))
+```
+
+The place comes back through the app, so the view follows the map a frame behind it. It stays
+upright: the event also says how far the marker turns and squashes, which an app can apply with
+Native Shell's transforms.
+
 A TSX app registers it from its Rust crate (`nsh.json` `"rust"`) and declares it with
 `nativeComponent("maplibre.map", { props: ["style", "camera", "content", "options", "events"] })`.
 
 ## Running the example
 
 [`examples/hello-map`](examples/hello-map) is a map of a few places in Zürich, which a tap names, with
-buttons that fly there, fit them in view and turn the globe on. It needs mln-rs next to this repository,
-as the core does.
+buttons that fly there, fit them in view and turn the globe on, and a callout over the station. It
+needs mln-rs next to this repository, as the core does.
 
 ```sh
 cargo run -p hello-map-nsh
@@ -90,6 +111,7 @@ iOS, since only the system makes touches.
 - Android, where Native Shell takes components from Kotlin or Java, so the map needs a small Kotlin
   view that hands its `Surface` to Rust.
 - Windows and Linux.
-- Markers and the content's `images`.
+- Markers that follow the map within its frame, which needs native views that hold children, and
+  the content's `images`.
 - A check of the iOS touches beyond the code: the walks tap on macOS, and through the shared
   component in the Whisker host on iOS.
