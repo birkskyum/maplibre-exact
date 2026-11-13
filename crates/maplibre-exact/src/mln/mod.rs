@@ -1,46 +1,30 @@
 //! The map drawn by mln-rs on Exact's GPU canvas.
 //!
-//! Exact calls a surface on one thread, so the surface keeps its mln-rs map
-//! there and runs that thread's mln-rs `RunLoop` once a frame. mln-rs renders
-//! on Exact's device into a texture of the surface's and submits that frame
-//! itself, and the surface then draws the texture into Exact's target with the
-//! encoder it is given, which Exact submits after. The surface asks for frames while the
-//! map loads, animates or follows a gesture, and for none once it is idle.
-//!
-//! The map's animations run on the host's clock, so they follow an agent's
-//! `clock` as the rest of an Exact app does. Tiles load in real time.
+//! Exact calls a surface on one thread. The map lives on mln-rs's runtime,
+//! and its render session renders on the surface's thread while the surface
+//! services it, into a texture of the surface's, on Exact's device. The
+//! surface then draws the texture into Exact's target with the encoder it is
+//! given, which Exact submits after. The surface asks for frames while the map
+//! loads, animates or follows a gesture, and for none once it is idle.
 
 mod blit;
+mod camera;
 mod content;
+mod engine;
 mod input;
 mod markers;
 mod target;
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use exact_gpu::{
     AssetChanges, AssetError, ChildrenMode, Frame, InputEvent, Placement, PointerPhase, Surface, SurfaceError, Value,
     wgpu,
 };
-use mln_actor::RunLoop;
-use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
-use mln_gfx::{BackendScope, ScopeType};
-use mln_map::{
-    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent, MapOptions, MapProjection,
-    UpdateReader,
-};
-use mln_renderer::Renderer;
-use mln_renderer::query::RenderedQueryOptions;
-use mln_util::chrono::{Clock, Duration, TimePoint};
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_map::MapProjection;
 use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
-use serde_json::Value as Json;
 
-use crate::protocol::{
-    self, Camera, CameraChange, Click, Command, Content, Event, Inputs, LngLat, Options, Padding, Point, Record,
-};
+use crate::protocol::{self, Command, Event, Inputs, Record};
 
 /// The factory a GPU module's registry names.
 #[must_use]
@@ -48,24 +32,12 @@ pub fn surface() -> Box<dyn Surface> {
     Box::new(MapSurface::default())
 }
 
-thread_local! {
-    /// The thread's loop, which every map on it shares, since mln-rs schedules
-    /// a map's work on the loop current when the map was made.
-    static RUN_LOOP: RunLoop = RunLoop::new();
-}
-
-/// How long one frame may spend on the loop's work before it draws.
-const LOOP_BUDGET: std::time::Duration = std::time::Duration::from_millis(4);
-
-/// How long a touch stays still to be a long press, in milliseconds: iOS's
-/// `UILongPressGestureRecognizer` default, and about Android's.
-const LONG_PRESS_MS: f64 = 500.0;
-
 /// A map on a canvas.
 #[derive(Default)]
 pub struct MapSurface {
     inputs: Option<Inputs>,
-    engine: Option<Engine>,
+    engine: Option<engine::Engine>,
+    blit: Option<blit::Blit>,
     /// Commands posted before the map was made.
     pending: Vec<Command>,
     events: Vec<String>,
@@ -78,68 +50,6 @@ pub struct MapSurface {
     decoded: HashMap<String, PremultipliedImage>,
     /// The canvas's children, some of which the content places on the map.
     children: markers::Children,
-}
-
-/// The map and what draws it, made at the first frame, on the device that
-/// frame brings.
-struct Engine {
-    // Dropped in this order, the renderer before its map and backend.
-    renderer: Renderer,
-    target: Option<target::MapTarget>,
-    map: Map,
-    updates: UpdateReader,
-    backend: Rc<mln_webgpu::RendererBackend>,
-    blit: blit::Blit,
-    gestures: GestureRecognizer,
-    /// Pointers down on the map.
-    pointers: u32,
-    /// The pointers down that haven't moved, for long presses, and for
-    /// clicks while gestures don't move the map.
-    presses: Vec<Press>,
-    /// Clicks the surface found itself, each a click or a context menu.
-    clicks: Vec<(ScreenCoordinate, Event)>,
-    /// How many of the recognizer's coming clicks end long presses, which
-    /// were context menus already.
-    long_pressed: u32,
-    /// The generation of the last update drawn.
-    drawn: u64,
-    /// The arguments the map last took.
-    applied: Inputs,
-    /// Whether the style has loaded, which content needs.
-    style_loaded: bool,
-    /// The content on the style, and whether `applied.content` differs.
-    held: Content,
-    content_changed: bool,
-    /// The camera last reported at rest.
-    rest: Camera,
-    idle: bool,
-    loaded: bool,
-    animating: bool,
-    click: Option<Click>,
-    contextmenu: Option<Click>,
-    error: Option<String>,
-    /// The last failure that refuses the canvas, until the surface reports it.
-    refusal: Option<String>,
-    attribution: String,
-    size: Size,
-    pixel_ratio: f32,
-    /// The map's clock at a host millisecond.
-    epoch: (TimePoint, f64),
-}
-
-/// A pointer down on the map that hasn't moved.
-struct Press {
-    id: u32,
-    /// Where it went down.
-    at: ScreenCoordinate,
-    /// When it went down, in the host's milliseconds.
-    since: f64,
-    /// A finger or a pen, which a long press is made with.
-    touch: bool,
-    /// The secondary mouse button, whose click opens a context menu.
-    secondary: bool,
-    /// Whether it has been held long enough to be a long press.
-    long: bool,
 }
 
 impl MapSurface {
@@ -172,7 +82,7 @@ impl Surface for MapSurface {
     ) -> bool {
         let Some(inputs) = self.inputs.clone() else { return false };
         if self.engine.is_none() {
-            match Engine::new(frame, device, queue, inputs.clone()) {
+            match engine::Engine::new(frame, device, queue, inputs.clone()) {
                 Ok(engine) => self.engine = Some(engine),
                 Err(message) => {
                     self.post(Event::Error);
@@ -189,9 +99,15 @@ impl Surface for MapSurface {
         let mut events = Vec::new();
         let wants_frame = engine.frame(frame, &self.decoded, &mut events);
         let size = [frame.width, frame.height];
-        self.children.place(&engine.map, &inputs.content.markers, size, frame.scale);
-        if let Some(texture) = engine.target.as_ref().and_then(target::MapTarget::frame) {
-            engine.blit.draw(device, encoder, target, format, texture);
+        if let Some((texture, view)) = engine.frame_texture() {
+            if let Some(view) = view
+                && let Ok(projection) = MapProjection::from_view(view)
+            {
+                let turn = [view.camera.bearing, view.camera.pitch];
+                self.children.place(&projection, turn, &inputs.content.markers, size, frame.scale);
+            }
+            let blit = self.blit.get_or_insert_with(|| blit::Blit::new(device));
+            blit.draw(device, encoder, target, format, texture);
             self.children.draw(device, queue, encoder, target, format, size);
         }
         if let Some(refusal) = engine.refusal.take() {
@@ -244,7 +160,6 @@ impl Surface for MapSurface {
                 self.decoded.insert(name.to_owned(), image);
                 if let Some(engine) = self.engine.as_mut() {
                     engine.content_changed = true;
-                    engine.idle = false;
                 }
             }
             Err(why) => {
@@ -259,11 +174,12 @@ impl Surface for MapSurface {
     }
 
     fn frame_ready(&self) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.target.as_ref().and_then(target::MapTarget::frame).is_some())
+        self.engine.as_ref().is_some_and(|engine| engine.frame_texture().is_some())
     }
 
     fn device_lost(&mut self) {
         self.engine = None;
+        self.blit = None;
     }
 
     fn opaque(&self) -> bool {
@@ -305,7 +221,7 @@ impl Surface for MapSurface {
         let interactive = engine.applied.options.interactive();
         self.input_changed = engine.press(event, interactive);
         if interactive && let Some((input, at_ms)) = input::translate(event) {
-            self.input_changed |= engine.gestures.handle(&mut engine.map, input, at_ms) || engine.pointers > 0;
+            self.input_changed |= engine.gesture(input, at_ms) || engine.pointers > 0;
         }
     }
 
@@ -350,514 +266,8 @@ impl Surface for MapSurface {
     }
 }
 
-impl Engine {
-    fn new(frame: &Frame, device: &wgpu::Device, queue: &wgpu::Queue, inputs: Inputs) -> Result<Engine, String> {
-        RUN_LOOP.with(|_| {});
-        let device = mln_webgpu::Device::from_wgpu(None, device.clone(), queue.clone(), None);
-        let backend = Rc::new(mln_webgpu::RendererBackend::new(&device));
-        let (width, height) = frame.pixels();
-        let target = target::MapTarget::new(&backend, Size::new(width, height))?;
-        let size = logical_size(frame);
-        let mut renderer = Renderer::new(backend.clone(), frame.scale, None);
-        let mut map = Map::new(MapOptions::new().with_size(size).with_pixel_ratio(frame.scale))
-            .map_err(|e| format!("maplibre: {}", e.message))?;
-        renderer.set_event_queue(Some(map.renderer_events()));
-        let updates = map.update_reader();
-        load_style(&mut map, &inputs);
-        map.jump_to(&camera_options(&everything(&inputs.camera)));
-        let mut engine = Engine {
-            renderer,
-            target,
-            map,
-            updates,
-            backend,
-            blit: blit::Blit::new(device.device()),
-            gestures: GestureRecognizer::default(),
-            pointers: 0,
-            presses: Vec::new(),
-            clicks: Vec::new(),
-            long_pressed: 0,
-            drawn: 0,
-            rest: inputs.camera,
-            applied: inputs,
-            style_loaded: false,
-            held: Content::default(),
-            content_changed: true,
-            idle: false,
-            loaded: false,
-            animating: false,
-            click: None,
-            contextmenu: None,
-            error: None,
-            refusal: None,
-            attribution: String::new(),
-            size,
-            pixel_ratio: frame.scale,
-            epoch: (Clock::now(), frame.now_ms),
-        };
-        engine.apply_options(&engine.applied.options.clone());
-        // The map rounds what it was given, so its own camera is the one at rest.
-        engine.rest = engine.camera();
-        Ok(engine)
-    }
-
-    /// Takes the arguments that changed since the map last took them. A
-    /// camera argument moves only what it names, from wherever the person
-    /// left the map.
-    fn apply_inputs(&mut self, inputs: &Inputs) {
-        if inputs.style != self.applied.style {
-            load_style(&mut self.map, inputs);
-            self.style_loaded = false;
-        }
-        let (old, new) = (self.applied.camera, inputs.camera);
-        let change = CameraChange {
-            center: (new.center != old.center).then_some(new.center),
-            zoom: (new.zoom != old.zoom).then_some(new.zoom),
-            bearing: (new.bearing != old.bearing).then_some(new.bearing),
-            pitch: (new.pitch != old.pitch).then_some(new.pitch),
-            padding: None,
-        };
-        if change != CameraChange::default() {
-            self.map.jump_to(&camera_options(&change));
-        }
-        if inputs.content != self.applied.content {
-            self.content_changed = true;
-        }
-        if inputs.options != self.applied.options {
-            self.apply_options(&inputs.options);
-        }
-        self.applied = inputs.clone();
-    }
-
-    fn apply_options(&mut self, options: &Options) {
-        let [[west, south], [east, north]] = options.max_bounds.unwrap_or([[-180.0, -90.0], [180.0, 90.0]]);
-        let bounds = match (LatLng::new(south, west), LatLng::new(north, east)) {
-            (Ok(a), Ok(b)) => LatLngBounds::hull(a, b),
-            _ => LatLngBounds::world(),
-        };
-        let mut limits = BoundOptions::default().with_lat_lng_bounds(bounds);
-        limits.min_zoom = Some(options.min_zoom.unwrap_or(0.0));
-        limits.max_zoom = Some(options.max_zoom.unwrap_or(22.0));
-        limits.min_pitch = Some(options.min_pitch.unwrap_or(0.0));
-        limits.max_pitch = Some(options.max_pitch.unwrap_or(60.0));
-        if let Err(e) = self.map.set_bounds(&limits) {
-            self.error = Some(format!("maplibre: options: {}", e.message));
-        }
-        let mut gestures = GestureOptions::default();
-        if options.drag_rotate == Some(false) {
-            gestures.drag_rotate = 0.0;
-            gestures.rotate_threshold = f64::INFINITY;
-        }
-        if options.pitch_with_rotate == Some(false) || options.touch_pitch == Some(false) {
-            gestures.drag_pitch = 0.0;
-        }
-        if options.scroll_zoom == Some(false) {
-            gestures.notch_zoom = 0.0;
-            gestures.scroll_zoom_rate = 0.0;
-            gestures.pinch_zoom_rate = 0.0;
-        }
-        self.gestures.set_options(gestures);
-    }
-
-    /// Follows the pointers that stay in place, for long presses, and, while
-    /// gestures don't move the map and so report none, for clicks. Returns
-    /// whether it found a click.
-    fn press(&mut self, event: &InputEvent, interactive: bool) -> bool {
-        let InputEvent::Pointer { id, phase, x, y, kind, buttons, at_ms, .. } = event else { return false };
-        let point = ScreenCoordinate::new(f64::from(*x), f64::from(*y));
-        let tolerance = self.gestures.options().click_tolerance;
-        let index = self.presses.iter().position(|press| press.id == *id);
-        match (phase, index) {
-            (PointerPhase::Down, _) => self.presses.push(Press {
-                id: *id,
-                at: point,
-                since: *at_ms,
-                touch: *kind != exact_gpu::PointerKind::Mouse,
-                secondary: buttons & 2 != 0,
-                long: false,
-            }),
-            (PointerPhase::Move, Some(index)) => {
-                let press = &self.presses[index];
-                if (press.at.x - point.x).hypot(press.at.y - point.y) > tolerance {
-                    self.presses.remove(index);
-                }
-            }
-            (PointerPhase::Up, Some(index)) => {
-                let press = self.presses.remove(index);
-                let still = (press.at.x - point.x).hypot(press.at.y - point.y) <= tolerance;
-                if press.long {
-                    self.long_pressed += u32::from(interactive);
-                } else if still && !interactive {
-                    self.clicks.push((point, if press.secondary { Event::Contextmenu } else { Event::Click }));
-                    return true;
-                }
-            }
-            (PointerPhase::Cancel, Some(index)) => {
-                self.presses.remove(index);
-            }
-            _ => {}
-        }
-        false
-    }
-
-    /// Turns a touch held still, alone, into a context menu.
-    fn long_press(&mut self, now_ms: f64) {
-        if let [press] = self.presses.as_mut_slice()
-            && press.touch
-            && !press.long
-            && now_ms - press.since >= LONG_PRESS_MS
-        {
-            press.long = true;
-            self.clicks.push((press.at, Event::Contextmenu));
-        }
-    }
-
-    /// Runs `command`, posted at `at_ms` on the host's clock, where an
-    /// animation it starts begins.
-    fn command(&mut self, command: Command, at_ms: f64) {
-        self.map.set_frame_time(Some(self.map_time(at_ms)));
-        match command {
-            Command::JumpTo(change) => self.map.jump_to(&camera_options(&change)),
-            Command::EaseTo(animation) => {
-                let camera = camera_options(&animation.camera);
-                self.animate(CameraUpdateMode::Ease, camera, animation_options(animation.duration));
-            }
-            Command::FlyTo(animation) => {
-                let camera = camera_options(&animation.camera);
-                self.animate(CameraUpdateMode::Fly, camera, animation_options(animation.duration));
-            }
-            Command::FitBounds { bounds, padding, duration } => {
-                match self.camera_for_bounds(bounds, padding.unwrap_or_default()) {
-                    Ok(camera) if duration == Some(0.0) => self.map.jump_to(&camera),
-                    Ok(camera) => self.animate(CameraUpdateMode::Ease, camera, animation_options(duration)),
-                    Err(e) => self.error = Some(format!("maplibre: fitBounds: {}", e.message)),
-                }
-            }
-            Command::SetStyle { style } => {
-                self.applied.style = style;
-                load_style(&mut self.map, &self.applied);
-                self.style_loaded = false;
-            }
-        }
-        self.idle = false;
-    }
-
-    /// The camera that shows `bounds` with `padding` points to spare inside
-    /// the map's own padding, as GL JS's `fitBounds` finds it: the map keeps
-    /// its padding, and the center moves to make up for an uneven `padding`.
-    fn animate(&mut self, mode: CameraUpdateMode, camera: CameraOptions, animation: AnimationOptions) {
-        self.map.update_camera(&CameraUpdate { mode, camera, animation, ..CameraUpdate::default() });
-    }
-
-    fn camera_for_bounds(&self, bounds: [[f64; 2]; 2], padding: Padding) -> Result<CameraOptions, mln_util::Error> {
-        let [[west, south], [east, north]] = bounds;
-        let kept = self.map.get_camera_options(None).padding.unwrap_or_default();
-        let [top, left, bottom, right] = padding.edges();
-        let total = EdgeInsets::new(kept.top + top, kept.left + left, kept.bottom + bottom, kept.right + right)?;
-        let bounds = LatLngBounds::hull(LatLng::new(south, west)?, LatLng::new(north, east)?);
-        let mut camera = self.map.camera_for_lat_lng_bounds(&bounds, &total, None, None)?;
-        let mut projection = MapProjection::new(&self.map);
-        projection.set_camera(&camera);
-        let [width, height] = [f64::from(self.size.width), f64::from(self.size.height)];
-        let focus =
-            ScreenCoordinate::new((kept.left + width - kept.right) / 2.0, (kept.top + height - kept.bottom) / 2.0);
-        camera.center = Some(projection.lat_lng_for_pixel(&focus, WrapMode::Wrapped)?);
-        camera.padding = Some(kept);
-        Ok(camera)
-    }
-
-    /// Runs the loop, the gestures and the map for `frame`, draws the map's
-    /// latest update, and returns whether the map wants another frame.
-    fn frame(&mut self, frame: &Frame, decoded: &HashMap<String, PremultipliedImage>, events: &mut Vec<Event>) -> bool {
-        self.resize(frame);
-        RUN_LOOP.with(|run_loop| {
-            let start = std::time::Instant::now();
-            while run_loop.run_once() && start.elapsed() < LOOP_BUDGET {}
-        });
-        self.map.set_frame_time(Some(self.map_time(frame.now_ms)));
-        self.animating = self.gestures.frame(&mut self.map, frame.now_ms);
-        self.long_press(frame.now_ms);
-        let mut clicks = std::mem::take(&mut self.clicks);
-        for gesture in self.gestures.take_events() {
-            if let GestureEvent::Click { position, button } = gesture {
-                if self.long_pressed > 0 {
-                    self.long_pressed -= 1;
-                } else if button == mln_gestures::Button::Secondary {
-                    clicks.push((position, Event::Contextmenu));
-                } else {
-                    clicks.push((position, Event::Click));
-                }
-            }
-        }
-        for (position, event) in clicks {
-            if let Ok(lat_lng) = self.map.lat_lng_for_pixel(&position, WrapMode::Wrapped) {
-                let click = Click {
-                    lng_lat: LngLat { lng: lat_lng.longitude(), lat: lat_lng.latitude() },
-                    point: Point { x: position.x, y: position.y },
-                    features: self.features_at(position),
-                };
-                match event {
-                    Event::Contextmenu => self.contextmenu = Some(click),
-                    _ => self.click = Some(click),
-                }
-                events.push(event);
-            }
-        }
-        self.map_events(events);
-        self.apply_content(decoded, events);
-        if self.updates.generation() != self.drawn {
-            self.idle = false;
-            self.draw();
-            self.map_events(events);
-        }
-        let resting = !self.animating && !self.map.in_transition() && self.pointers == 0;
-        if resting {
-            let camera = self.camera();
-            if camera != self.rest {
-                self.rest = camera;
-                events.push(Event::Moveend);
-            }
-        }
-        !self.idle || !resting
-    }
-
-    fn map_events(&mut self, events: &mut Vec<Event>) {
-        for event in self.map.drain_events() {
-            match event {
-                MapEvent::StyleLoaded => {
-                    // A new style holds none of the content.
-                    self.style_loaded = true;
-                    self.held = Content::default();
-                    self.content_changed = true;
-                    self.attribution = self.attribution();
-                }
-                MapEvent::Idle => {
-                    self.idle = true;
-                    // A tiled source knows its attribution once its TileJSON has loaded.
-                    self.attribution = self.attribution();
-                    if !self.loaded {
-                        self.loaded = true;
-                        events.push(Event::Load);
-                    }
-                }
-                MapEvent::LoadingStarted => self.idle = false,
-                // A style that fails to load is the network's or the server's
-                // doing, so the app hears of it and the canvas isn't refused.
-                MapEvent::LoadingFailed(error) => {
-                    self.error = Some(format!("maplibre: {error:?}"));
-                    events.push(Event::Error);
-                }
-                MapEvent::RenderError(error) => self.fail(format!("maplibre: {}", error.message), events),
-                _ => {}
-            }
-        }
-    }
-
-    fn apply_content(&mut self, decoded: &HashMap<String, PremultipliedImage>, events: &mut Vec<Event>) {
-        if !self.style_loaded || !self.content_changed {
-            return;
-        }
-        self.content_changed = false;
-        let (held, errors, unsupported) =
-            content::apply(self.map.style_mut(), &self.held, &self.applied.content, decoded);
-        self.held = held;
-        let join = |all: String, error: String| format!("{all}; {error}");
-        if let Some(message) = errors.into_iter().reduce(join) {
-            self.fail(message, events);
-        } else if let Some(message) = unsupported.into_iter().reduce(join) {
-            // What the engine doesn't draw, which another engine may: the
-            // app hears of it, and the canvas isn't refused.
-            self.error = Some(message);
-            events.push(Event::Error);
-        }
-        self.idle = false;
-    }
-
-    /// Reports a failure that is the app's or the engine's, which also refuses
-    /// the canvas so that Exact reports it.
-    fn fail(&mut self, message: String, events: &mut Vec<Event>) {
-        self.error = Some(message.clone());
-        self.refusal = Some(message);
-        events.push(Event::Error);
-    }
-
-    /// The features the content's layers drew at `point`, topmost first.
-    fn features_at(&self, point: ScreenCoordinate) -> Vec<protocol::Feature> {
-        if self.held.layers.is_empty() {
-            return Vec::new();
-        }
-        let pad = self.held.hit_padding;
-        let geometry = if pad > 0.0 {
-            let (x0, y0, x1, y1) = (point.x - pad, point.y - pad, point.x + pad, point.y + pad);
-            vec![
-                ScreenCoordinate::new(x0, y0),
-                ScreenCoordinate::new(x1, y0),
-                ScreenCoordinate::new(x1, y1),
-                ScreenCoordinate::new(x0, y1),
-                ScreenCoordinate::new(x0, y0),
-            ]
-        } else {
-            vec![point]
-        };
-        let options = RenderedQueryOptions {
-            layer_ids: Some(self.held.layers.iter().map(|layer| layer.id.clone()).collect()),
-            filter: None,
-        };
-        let features = self.renderer.query_rendered_features(&geometry, &options).unwrap_or_default();
-        features
-            .iter()
-            .map(|found| {
-                let mut feature = feature(found);
-                if feature.properties.get("cluster") == Some(&Json::Bool(true)) {
-                    feature.cluster_expansion_zoom = self.cluster_expansion_zoom(found);
-                }
-                feature
-            })
-            .collect()
-    }
-
-    /// The zoom at which a cluster of a clustered GeoJSON source splits.
-    fn cluster_expansion_zoom(&self, cluster: &mln_util::feature::Feature) -> Option<f64> {
-        use mln_renderer::query::FeatureExtensionValue;
-        let value =
-            self.renderer.query_feature_extensions(&cluster.source, cluster, "supercluster", "expansion-zoom", None);
-        match value {
-            Ok(FeatureExtensionValue::Value(value)) => match value {
-                ::feature::Value::Uint(zoom) => Some(zoom as f64),
-                ::feature::Value::Int(zoom) => Some(zoom as f64),
-                ::feature::Value::Double(zoom) => Some(zoom),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn draw(&mut self) {
-        let Some(update) = self.updates.latest() else { return };
-        self.drawn = update.generation;
-        let backend: Rc<dyn mln_gfx::RendererBackend> = self.backend.clone();
-        let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-        if let Some(target) = self.target.as_mut() {
-            target.render(&mut self.renderer, &update.parameters);
-        }
-    }
-
-    fn resize(&mut self, frame: &Frame) {
-        let size = logical_size(frame);
-        if size != self.size && self.map.set_size(size).is_ok() {
-            self.size = size;
-        }
-        if frame.scale != self.pixel_ratio && self.map.set_pixel_ratio(frame.scale).is_ok() {
-            self.renderer.set_pixel_ratio(frame.scale);
-            self.pixel_ratio = frame.scale;
-        }
-        let (width, height) = frame.pixels();
-        if let Err(message) = target::MapTarget::resize(&mut self.target, &self.backend, Size::new(width, height)) {
-            self.refusal = Some(message);
-        }
-    }
-
-    fn attribution(&self) -> String {
-        let sources = self.map.style().get_sources();
-        let html: Vec<String> = sources.iter().filter_map(|source| source.get_attribution()).collect();
-        protocol::attribution_text(html.iter().map(String::as_str))
-    }
-
-    /// The map's clock at a host millisecond.
-    fn map_time(&self, at_ms: f64) -> TimePoint {
-        self.epoch.0 + Duration::from_nanos(((at_ms - self.epoch.1) * 1e6) as i64)
-    }
-
-    fn camera(&self) -> Camera {
-        let options = self.map.get_camera_options(None);
-        let center = options.center.unwrap_or_default();
-        Camera {
-            center: [center.longitude(), center.latitude()],
-            zoom: options.zoom.unwrap_or_default(),
-            bearing: options.bearing.unwrap_or_default(),
-            pitch: options.pitch.unwrap_or_default(),
-        }
-    }
-
-    fn record(&self) -> Record {
-        // The camera at rest, so the record changes when something happens
-        // and not every frame of a gesture.
-        Record {
-            camera: self.rest,
-            loaded: self.loaded && self.idle,
-            click: self.click.clone(),
-            contextmenu: self.contextmenu.clone(),
-            failure: self.error.clone(),
-            attribution: self.attribution.clone(),
-        }
-    }
-}
-
-fn feature(feature: &mln_util::feature::Feature) -> protocol::Feature {
-    use ::feature::{Identifier, Value as FeatureValue};
-    let properties = match mln_conversion::value_to_json(&FeatureValue::Object(feature.properties.clone())) {
-        Json::Object(properties) => properties,
-        _ => serde_json::Map::new(),
-    };
-    let id = match &feature.id {
-        Identifier::Null => Json::Null,
-        Identifier::Uint(id) => Json::from(*id),
-        Identifier::Int(id) => Json::from(*id),
-        Identifier::Double(id) => Json::from(*id),
-        Identifier::String(id) => Json::from(id.clone()),
-    };
-    protocol::Feature {
-        id,
-        layer: feature.layer.clone(),
-        source: feature.source.clone(),
-        source_layer: feature.source_layer.clone(),
-        properties,
-        cluster_expansion_zoom: None,
-    }
-}
-
 /// The name the host takes for an app-relative path under `assets/`.
 fn in_assets(src: &str) -> Option<String> {
     src.strip_prefix("assets/").filter(|name| !name.is_empty()).map(str::to_owned)
 }
 
-/// The canvas's size in whole points, at least one by one.
-fn logical_size(frame: &Frame) -> Size {
-    Size::new((frame.width.round() as u32).max(1), (frame.height.round() as u32).max(1))
-}
-
-fn load_style(map: &mut Map, inputs: &Inputs) {
-    if inputs.style_is_document() {
-        map.style_mut().load_json(&inputs.style);
-    } else {
-        map.style_mut().load_url(&inputs.style);
-    }
-}
-
-fn everything(camera: &Camera) -> CameraChange {
-    CameraChange {
-        center: Some(camera.center),
-        zoom: Some(camera.zoom),
-        bearing: Some(camera.bearing),
-        pitch: Some(camera.pitch),
-        padding: None,
-    }
-}
-
-fn camera_options(change: &CameraChange) -> CameraOptions {
-    CameraOptions::default()
-        .with_center(change.center.and_then(|[longitude, latitude]| LatLng::new(latitude, longitude).ok()))
-        .with_zoom(change.zoom)
-        .with_bearing(change.bearing)
-        .with_pitch(change.pitch)
-        .with_padding(change.padding.and_then(|padding| {
-            let [top, left, bottom, right] = padding.edges();
-            EdgeInsets::new(top, left, bottom, right).ok()
-        }))
-}
-
-fn animation_options(duration_ms: Option<f64>) -> AnimationOptions {
-    let mut options = AnimationOptions::default();
-    options.duration = duration_ms.map(|ms| Duration::from_nanos((ms * 1e6) as i64));
-    options
-}

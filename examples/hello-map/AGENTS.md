@@ -16,8 +16,6 @@ app.json's `"commands"`.
 `bun exact.mjs update` refreshes files. `bun exact.mjs lock` repairs Cargo lock drift.
 `bun exact.mjs update --without linux` stops shipping Linux.
 `bun ../../../exact/scripts/exact.mjs setup --check` names what a native build lacks.
-Shared data: `exact new <path> --snapback`, or `bun exact.mjs snapback` here.
-Install `snapback4@0.4.33` above; ../../../exact/snapback4/README.md has setup and server commands.
 
 Generated, so don't edit: `exact.mjs`, `rust-toolchain.toml`, `.cargo/config.toml`,
 `Cargo.toml`'s `[patch.crates-io]` and this block.

@@ -1,41 +1,121 @@
-//! The app's content on an mln-rs style. Each change does the least it can.
-//! A GeoJSON source takes new data in place, a layer takes changed paint and
-//! layout properties, filter and zoom range in place, and only what the style
-//! can't change in place (a source's type or tiles, a layer's type or source,
-//! the layers' order) is removed and added again.
+//! The app's content on the map's style, sent as the map's style commands.
+//! Each change does the least it can. A GeoJSON source takes new data in
+//! place, a layer takes changed paint and layout properties, filter and zoom
+//! range in place, and only what the style can't change in place (a source's
+//! type or tiles, a layer's type or source, the layers' order) is removed and
+//! added again.
+//!
+//! The commands run in order on the map's thread and report how they went
+//! later, so what the map holds of the content is what was sent. A command
+//! that fails takes its part back out, so the next change tries it again.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error as ConversionError};
-use mln_style::Style;
-use mln_style::conversion::{convert_layer, convert_source};
-use mln_style::sources::geojson_source::GeoJSONSource;
-use mln_util::ErrorKind;
+use mln_runtime::{Applied, Completion, Error, ErrorKind, Map};
 use mln_util::image::PremultipliedImage;
 use serde_json::Value as Json;
 
 use crate::protocol::{Content, Layer};
 
-/// Brings `style` from `applied` to `desired`, with the images decoded so far
-/// by their paths, and returns what the style then holds of the content, the
-/// errors on the way, and what mln-rs doesn't draw (terrain). What failed to
-/// add, or an image still on its way, is left out, so the next change tries
-/// it again.
+/// What content needs of the loaded style itself: its root properties, which
+/// come back when the content drops its own, and its layers by type, which a
+/// content layer can draw under.
+#[derive(Debug, Default)]
+pub(super) struct Base {
+    roots: serde_json::Map<String, Json>,
+    layers: Vec<(String, String)>,
+}
+
+impl Base {
+    /// The base of a loaded style's JSON, before any content is on it.
+    pub(super) fn parse(style: &str) -> Base {
+        let Ok(Json::Object(mut style)) = serde_json::from_str::<Json>(style) else { return Base::default() };
+        let layers = match style.remove("layers") {
+            Some(Json::Array(layers)) => layers
+                .iter()
+                .filter_map(|layer| Some((layer.get("id")?.as_str()?.to_owned(), layer.get("type")?.as_str()?.to_owned())))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Base { roots: style, layers }
+    }
+
+    /// The first of the style's layers of type `kind` that none of the
+    /// content is.
+    fn first_of_type(&self, content: &Content, kind: &str) -> Option<String> {
+        self.layers
+            .iter()
+            .find(|(id, type_)| type_ == kind && !content.layers.iter().any(|layer| &layer.id == id))
+            .map(|(id, _)| id.clone())
+    }
+}
+
+/// A command sent for the content, and what it takes back out of what the
+/// map holds if it fails.
+pub(super) struct Sent {
+    pub(super) completion: Completion<Applied>,
+    pub(super) what: String,
+    pub(super) undo: Undo,
+}
+
+pub(super) enum Undo {
+    Nothing,
+    Image(String),
+    Source(String),
+    Layer(String),
+    Root(String),
+    State(String),
+}
+
+impl Undo {
+    /// Takes what failed out of `held`. A root property that the engine
+    /// doesn't draw stays, so that it is reported once.
+    pub(super) fn apply(&self, held: &mut Content, error: &Error) {
+        match self {
+            Undo::Nothing => {}
+            Undo::Image(id) => held.images.retain(|image| &image.id != id),
+            Undo::Source(id) => held.sources.retain(|(source, _)| source != id),
+            Undo::Layer(id) => held.layers.retain(|layer| &layer.id != id),
+            Undo::Root(name) if error.kind != ErrorKind::Unsupported => held.roots.retain(|(root, _)| root != name),
+            Undo::Root(_) => {}
+            Undo::State(name) => held.state.retain(|(key, _)| key != name),
+        }
+    }
+}
+
+/// The commands of one change, in the order they run.
+struct Commands<'a> {
+    map: &'a Map,
+    sent: Vec<Sent>,
+}
+
+impl Commands<'_> {
+    fn send(&mut self, what: String, undo: Undo, command: Result<Completion<Applied>, Error>) {
+        let completion = command.unwrap_or_else(|error| Completion::ready(Err(error)));
+        self.sent.push(Sent { completion, what, undo });
+    }
+}
+
+/// Brings the map's style from `applied` to `desired`, with the images
+/// decoded so far by their paths, on a style whose base is `base`. Returns
+/// what the style then holds of the content, and the commands sent, whose
+/// failures [`Undo`] takes back out. An image still on its way is left out,
+/// so the next change brings it in.
 pub(super) fn apply(
-    style: &mut Style,
+    map: &Map,
+    base: &Base,
     applied: &Content,
     desired: &Content,
     decoded: &HashMap<String, PremultipliedImage>,
-) -> (Content, Vec<String>, Vec<String>) {
-    let mut errors = Vec::new();
+) -> (Content, Vec<Sent>) {
+    let mut commands = Commands { map, sent: Vec::new() };
     let mut held = applied.clone();
 
     // Images go first and come in first, so layers find them.
     held.images.retain(|image| {
         let keep = desired.images.contains(image);
         if !keep {
-            style.remove_image(&image.id);
+            commands.send(format!("image {}", image.id), Undo::Nothing, map.remove_style_image(&image.id));
         }
         keep
     });
@@ -55,13 +135,9 @@ pub(super) fn apply(
             None,
             None,
         );
-        match made {
-            Ok(made) => {
-                style.add_image(Arc::new(made));
-                held.images.push(image.clone());
-            }
-            Err(e) => errors.push(format!("maplibre: image {}: {}", image.id, e.message)),
-        }
+        let what = format!("image {}", image.id);
+        commands.send(what, Undo::Image(image.id.clone()), made.and_then(|made| map.set_style_image(made)));
+        held.images.push(image.clone());
     }
 
     // Sources that change in place, and those that go or are replaced.
@@ -70,13 +146,15 @@ pub(super) fn apply(
         match desired.source(id) {
             None => replaced.push(id.clone()),
             Some(new) if new == old => {}
-            Some(new) if same_but_data(old, new) => match set_geojson_data(style, id, &new["data"]) {
-                Ok(()) => set_source(&mut held, id, new),
-                Err(error) => {
-                    errors.push(error);
-                    replaced.push(id.clone());
-                }
-            },
+            Some(new) if same_but_data(old, new) => {
+                let data = &new["data"];
+                let command = match data.as_str() {
+                    Some(url) => map.set_geojson_source_url(id, url),
+                    None => map.set_geojson_source_data(id, data.to_string()),
+                };
+                commands.send(format!("source {id}'s data"), Undo::Nothing, command);
+                set_source(&mut held, id, new);
+            }
             Some(_) => replaced.push(id.clone()),
         }
     }
@@ -94,11 +172,11 @@ pub(super) fn apply(
         .map(|old| old.id.clone())
         .collect();
     for id in &removed {
-        style.remove_layer(id);
+        commands.send(format!("layer {id}"), Undo::Nothing, map.remove_style_layer(id));
         held.layers.retain(|layer| &layer.id != id);
     }
     for id in &replaced {
-        style.remove_source(id);
+        commands.send(format!("source {id}"), Undo::Nothing, map.remove_style_source(id));
         held.sources.retain(|(source, _)| source != id);
     }
 
@@ -107,21 +185,18 @@ pub(super) fn apply(
         if held.source(id).is_some() {
             continue;
         }
-        let mut error = ConversionError::default();
-        match convert_source(&Convertible::from(source), &mut error, id) {
-            Some(converted) => match style.add_source(converted) {
-                Ok(()) => held.sources.push((id.clone(), source.clone())),
-                Err(e) => errors.push(format!("maplibre: source {id}: {}", e.message)),
-            },
-            None => errors.push(format!("maplibre: source {id}: {}", error.message)),
-        }
+        commands.send(format!("source {id}"), Undo::Source(id.clone()), map.add_style_source_json(id, source.to_string()));
+        held.sources.push((id.clone(), source.clone()));
     }
 
     // Layers that stay take their changes in place.
     for new in &desired.layers {
         let Some(index) = held.layers.iter().position(|old| old.id == new.id) else { continue };
         if held.layers[index].json != new.json {
-            errors.extend(set_properties(style, &held.layers[index], new));
+            for (name, value) in changes(&held.layers[index], new) {
+                let command = map.set_style_layer_property(&new.id, &name, value.to_string());
+                commands.send(format!("layer {}'s {name}", new.id), Undo::Nothing, command);
+            }
             held.layers[index] = new.clone();
         }
     }
@@ -136,16 +211,11 @@ pub(super) fn apply(
             .iter()
             .find(|above| held.layers.iter().any(|held| held.id == above.id) || added.contains(&above.id))
             .map(|above| above.id.clone());
-        let under_type = layer.before_type.as_deref().and_then(|kind| first_of_type(style, desired, kind));
+        let under_type = layer.before_type.as_deref().and_then(|kind| base.first_of_type(desired, kind));
         let before = layer.before.clone().or(under_type).or(next);
-        let mut error = ConversionError::default();
-        match convert_layer(&Convertible::from(&layer.json), &mut error) {
-            Some(converted) => match style.add_layer(converted, before.as_deref()) {
-                Ok(()) => added.push(layer.id.clone()),
-                Err(e) => errors.push(format!("maplibre: layer {}: {}", layer.id, e.message)),
-            },
-            None => errors.push(format!("maplibre: layer {}: {}", layer.id, error.message)),
-        }
+        let command = map.add_style_layer_json(layer.json.to_string(), before);
+        commands.send(format!("layer {}", layer.id), Undo::Layer(layer.id.clone()), command);
+        added.push(layer.id.clone());
     }
     held.layers = desired
         .layers
@@ -154,25 +224,22 @@ pub(super) fn apply(
         .cloned()
         .collect();
     held.hit_padding = desired.hit_padding;
-    let unsupported = apply_roots(style, &mut held, desired, &mut errors);
-    apply_state(style, &mut held, desired, &mut errors);
-    (held, errors, unsupported)
+    apply_roots(&mut commands, base, &mut held, desired);
+    apply_state(&mut commands, &mut held, desired);
+    (held, commands.sent)
 }
 
 /// Sets the root properties the content changed over the base style's, and
-/// gives back the base style's for those it dropped. Returns what mln-rs
-/// doesn't draw, which stays held so that it is reported once.
-fn apply_roots(style: &mut Style, held: &mut Content, desired: &Content, errors: &mut Vec<String>) -> Vec<String> {
-    let mut unsupported = Vec::new();
+/// gives back the base style's for those it dropped.
+fn apply_roots(commands: &mut Commands<'_>, base: &Base, held: &mut Content, desired: &Content) {
     let dropped: Vec<String> =
         held.roots.iter().filter(|(name, _)| desired.root(name).is_none()).map(|(name, _)| name.clone()).collect();
     for name in dropped {
         held.roots.retain(|(root, _)| *root != name);
-        let base = serde_json::from_str::<Json>(&style.get_json()).ok().and_then(|base| base.get(&name).cloned());
-        if name != "terrain"
-            && let Err(e) = style.set_root_property_json(&name, &base.unwrap_or(Json::Null).to_string())
-        {
-            errors.push(format!("maplibre: {name}: {}", e.message));
+        if name != "terrain" {
+            let value = base.roots.get(&name).cloned().unwrap_or(Json::Null);
+            let command = commands.map.set_style_root_property(&name, value.to_string());
+            commands.send(name, Undo::Nothing, command);
         }
     }
     for (name, value) in &desired.roots {
@@ -180,21 +247,15 @@ fn apply_roots(style: &mut Style, held: &mut Content, desired: &Content, errors:
             continue;
         }
         held.roots.retain(|(root, _)| root != name);
-        match style.set_root_property_json(name, &value.to_string()) {
-            Ok(()) => held.roots.push((name.clone(), value.clone())),
-            Err(e) if e.kind == ErrorKind::Unsupported => {
-                unsupported.push(format!("maplibre: {name}: {}", e.message));
-                held.roots.push((name.clone(), value.clone()));
-            }
-            Err(e) => errors.push(format!("maplibre: {name}: {}", e.message)),
-        }
+        let command = commands.map.set_style_root_property(name, value.to_string());
+        commands.send(name.clone(), Undo::Root(name.clone()), command);
+        held.roots.push((name.clone(), value.clone()));
     }
-    unsupported
 }
 
 /// Sets the global state values the content changed, and gives those it
 /// dropped back the defaults the style's `state` gives them.
-fn apply_state(style: &mut Style, held: &mut Content, desired: &Content, errors: &mut Vec<String>) {
+fn apply_state(commands: &mut Commands<'_>, held: &mut Content, desired: &Content) {
     let dropped: Vec<String> = held
         .state
         .iter()
@@ -203,29 +264,18 @@ fn apply_state(style: &mut Style, held: &mut Content, desired: &Content, errors:
         .collect();
     for name in dropped {
         held.state.retain(|(key, _)| *key != name);
-        if let Err(e) = style.set_global_state_property_json(&name, "null") {
-            errors.push(format!("maplibre: state {name}: {}", e.message));
-        }
+        let command = commands.map.set_global_state_property(&name, "null");
+        commands.send(format!("state {name}"), Undo::Nothing, command);
     }
     for (name, value) in &desired.state {
         if held.state_value(name) == Some(value) {
             continue;
         }
         held.state.retain(|(key, _)| key != name);
-        match style.set_global_state_property_json(name, &value.to_string()) {
-            Ok(()) => held.state.push((name.clone(), value.clone())),
-            Err(e) => errors.push(format!("maplibre: state {name}: {}", e.message)),
-        }
+        let command = commands.map.set_global_state_property(name, value.to_string());
+        commands.send(format!("state {name}"), Undo::State(name.clone()), command);
+        held.state.push((name.clone(), value.clone()));
     }
-}
-
-/// The base style's first layer of type `kind`, which none of the content is.
-fn first_of_type(style: &Style, content: &Content, kind: &str) -> Option<String> {
-    style
-        .get_layers()
-        .iter()
-        .find(|layer| layer.get_type_info().type_ == kind && !content.layers.iter().any(|c| c.id == layer.get_id()))
-        .map(|layer| layer.get_id())
 }
 
 /// The ids of `layers` that `other` has too, in `layers`' order.
@@ -255,22 +305,7 @@ fn same_but_data(old: &Json, new: &Json) -> bool {
     old.get("type").and_then(Json::as_str) == Some("geojson") && without_data(old) == without_data(new)
 }
 
-fn set_geojson_data(style: &Style, id: &str, data: &Json) -> Result<(), String> {
-    let source = style
-        .get_source(id)
-        .and_then(|source| source.as_any().downcast_ref::<GeoJSONSource>())
-        .ok_or_else(|| format!("maplibre: source {id} is no GeoJSON source on the style"))?;
-    if let Some(url) = data.as_str() {
-        source.set_url(url);
-        return Ok(());
-    }
-    let mut error = ConversionError::default();
-    let geojson = mln_conversion::to_geojson(&Convertible::from(data), &mut error)
-        .ok_or_else(|| format!("maplibre: source {id}'s data: {}", error.message))?;
-    source.set_geojson(&geojson).map_err(|e| format!("maplibre: source {id}'s data: {}", e.message))
-}
-
-/// The members of a layer that `set_property` takes; a change to any other
+/// The members of a layer that the map sets in place; a change to any other
 /// one makes a new layer.
 const SETTABLE: [&str; 5] = ["paint", "layout", "filter", "minzoom", "maxzoom"];
 
@@ -287,10 +322,10 @@ fn in_place(old: &Layer, new: &Layer) -> bool {
     old.before == new.before && old.before_type == new.before_type && rest(old) == rest(new)
 }
 
-/// Sets what changed in `new`'s paint and layout properties, filter and zoom
-/// range, and resets what it no longer has.
-fn set_properties(style: &mut Style, old: &Layer, new: &Layer) -> Vec<String> {
-    let mut changes: Vec<(String, Json)> = Vec::new();
+/// What changed in `new`'s paint and layout properties, filter and zoom
+/// range, with `null` for what it no longer has, which resets it.
+fn changes(old: &Layer, new: &Layer) -> Vec<(String, Json)> {
+    let mut changes = Vec::new();
     for group in ["paint", "layout"] {
         let empty = serde_json::Map::new();
         let (before, after) = (
@@ -298,9 +333,8 @@ fn set_properties(style: &mut Style, old: &Layer, new: &Layer) -> Vec<String> {
             new.json.get(group).and_then(Json::as_object).unwrap_or(&empty),
         );
         for name in before.keys().chain(after.keys().filter(|name| !before.contains_key(*name))) {
-            let value = after.get(name).cloned().unwrap_or(Json::Null);
             if before.get(name) != after.get(name) {
-                changes.push((name.clone(), value));
+                changes.push((name.clone(), after.get(name).cloned().unwrap_or(Json::Null)));
             }
         }
     }
@@ -309,43 +343,59 @@ fn set_properties(style: &mut Style, old: &Layer, new: &Layer) -> Vec<String> {
             changes.push((member.to_owned(), new.json.get(member).cloned().unwrap_or(Json::Null)));
         }
     }
-    let Some(mut layer) = style.get_layer_mut(&new.id) else {
-        return vec![format!("maplibre: layer {} is gone from the style", new.id)];
-    };
     changes
-        .iter()
-        .filter_map(|(name, value)| {
-            layer
-                .set_property(name, &Convertible::from(value), None)
-                .map(|error| format!("maplibre: layer {}'s {name}: {}", new.id, error.message))
-        })
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use mln_runtime::{MapOptions, Runtime, RuntimeOptions};
+
     use super::*;
 
     const BASE: &str = r#"{"version":8,"sources":{},"layers":[
         {"id":"water","type":"background"},{"id":"labels","type":"background"}]}"#;
 
-    fn style() -> Style {
-        let mut style = Style::new(1.0);
-        style.load_json(BASE);
-        style
+    /// A map of the style `json`, and its base.
+    fn map(json: &str) -> (Runtime, Map, Base) {
+        let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+        let (map, created) = runtime.create_map(MapOptions::default()).unwrap();
+        created.wait().unwrap();
+        map.set_style_json(json).unwrap().wait().unwrap();
+        let base = Base::parse(&map.loaded_style_json().unwrap().wait().unwrap());
+        (runtime, map, base)
+    }
+
+    /// Applies `desired` and waits for its commands. Returns what the map
+    /// holds of it and the errors, each with what failed.
+    fn change(
+        map: &Map,
+        base: &Base,
+        applied: &Content,
+        desired: &Content,
+        decoded: &HashMap<String, PremultipliedImage>,
+    ) -> (Content, Vec<(String, ErrorKind)>) {
+        let (mut held, sent) = apply(map, base, applied, desired, decoded);
+        let mut errors = Vec::new();
+        for sent in sent {
+            if let Err(error) = sent.completion.wait() {
+                sent.undo.apply(&mut held, &error);
+                errors.push((sent.what, error.kind));
+            }
+        }
+        (held, errors)
     }
 
     fn content(text: &str) -> Content {
         Content::parse(text).unwrap_or_else(|e| panic!("{e}"))
     }
 
-    fn layers(style: &Style) -> Vec<String> {
-        style.get_layers().iter().map(|layer| layer.get_id()).collect()
+    fn layers(map: &Map) -> Vec<String> {
+        map.style_layers().unwrap().wait().unwrap().into_iter().map(|layer| layer.id).collect()
     }
 
-    fn paint(style: &Style, layer: &str, name: &str) -> Json {
-        let layer = style.get_layer(layer).unwrap_or_else(|| panic!("no layer {layer}"));
-        mln_conversion::value_to_json(&layer.serialize())["paint"][name].clone()
+    fn paint(map: &Map, layer: &str, name: &str) -> Json {
+        let json = map.style_layer_json(layer).unwrap().wait().unwrap().unwrap_or_else(|| panic!("no layer {layer}"));
+        serde_json::from_str::<Json>(&json).unwrap()["paint"][name].clone()
     }
 
     const POINTS: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
@@ -360,55 +410,55 @@ mod tests {
 
     #[test]
     fn content_draws_over_the_base_style_in_order_unless_it_names_a_layer_to_draw_under() {
-        let mut style = style();
-        let (held, errors, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
-        assert!(style.get_source("points").is_some());
+        let (_runtime, map, base) = map(BASE);
+        let (held, errors) = change(&map, &base, &Content::default(), &content(&dots("red")), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(layers(&map), ["water", "halo", "labels", "dots"]);
+        assert!(map.style_source("points").unwrap().wait().unwrap().is_some());
         assert_eq!(held.layers.len(), 2);
     }
 
     #[test]
     fn a_layer_can_draw_under_the_first_base_layer_of_a_type() {
-        let mut style = Style::new(1.0);
-        style.load_json(
+        let (_runtime, map, base) = map(
             r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
                 "layers":[{"id":"water","type":"background"},
                           {"id":"road-names","type":"symbol","source":"points"},
                           {"id":"city-names","type":"symbol","source":"points"}]}"#,
         );
         let under_labels = r#"{"layers":[{"id":"trail","type":"line","source":"points","beforeType":"symbol"}]}"#;
-        let (_, errors, _) = apply(&mut style, &Content::default(), &content(under_labels), &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(layers(&style), ["water", "trail", "road-names", "city-names"]);
+        let (_, errors) = change(&map, &base, &Content::default(), &content(under_labels), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(layers(&map), ["water", "trail", "road-names", "city-names"]);
     }
 
     #[test]
     fn a_changed_paint_property_is_set_on_the_layer_that_is_there() {
-        let mut style = style();
-        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
-        let (held, errors, _) = apply(&mut style, &held, &content(&dots("blue")), &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(paint(&style, "dots", "circle-color"), serde_json::json!(["rgba", 0.0, 0.0, 255.0, 1.0]));
-        assert_eq!(layers(&style), ["water", "halo", "labels", "dots"]);
+        let (_runtime, map, base) = map(BASE);
+        let (held, _) = change(&map, &base, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors) = change(&map, &base, &held, &content(&dots("blue")), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(paint(&map, "dots", "circle-color"), serde_json::json!(["rgba", 0.0, 0.0, 255.0, 1.0]));
+        assert_eq!(layers(&map), ["water", "halo", "labels", "dots"]);
         assert_eq!(held, content(&dots("blue")));
     }
 
     #[test]
     fn a_removed_property_goes_back_to_its_default() {
-        let mut style = style();
-        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (_runtime, map, base) = map(BASE);
+        let (held, _) = change(&map, &base, &Content::default(), &content(&dots("red")), &HashMap::new());
         let without = r#"{"sources":{"points":POINTS},"layers":[
             {"id":"halo","type":"circle","source":"points","beforeId":"labels"},
             {"id":"dots","type":"circle","source":"points"}]}"#
             .replace("POINTS", POINTS);
-        apply(&mut style, &held, &content(&without), &HashMap::new());
-        assert_eq!(paint(&style, "dots", "circle-color"), Json::Null);
+        let (_, errors) = change(&map, &base, &held, &content(&without), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(paint(&map, "dots", "circle-color"), Json::Null);
     }
 
     #[test]
     fn reordered_layers_are_added_again_in_the_new_order() {
-        let mut style = style();
+        let (_runtime, map, base) = map(BASE);
         let two = |first: &str, second: &str| {
             content(&format!(
                 r#"{{"sources":{{"points":{POINTS}}},"layers":[
@@ -416,72 +466,74 @@ mod tests {
                     {{"id":"{second}","type":"circle","source":"points"}}]}}"#
             ))
         };
-        let (held, _, _) = apply(&mut style, &Content::default(), &two("a", "b"), &HashMap::new());
-        assert_eq!(layers(&style), ["water", "labels", "a", "b"]);
-        apply(&mut style, &held, &two("b", "a"), &HashMap::new());
-        assert_eq!(layers(&style), ["water", "labels", "b", "a"]);
+        let (held, _) = change(&map, &base, &Content::default(), &two("a", "b"), &HashMap::new());
+        assert_eq!(layers(&map), ["water", "labels", "a", "b"]);
+        change(&map, &base, &held, &two("b", "a"), &HashMap::new());
+        assert_eq!(layers(&map), ["water", "labels", "b", "a"]);
     }
 
     #[test]
     fn content_that_goes_leaves_the_style_as_it_was() {
-        let mut style = style();
-        let (held, _, _) = apply(&mut style, &Content::default(), &content(&dots("red")), &HashMap::new());
-        let (held, errors, _) = apply(&mut style, &held, &Content::default(), &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(layers(&style), ["water", "labels"]);
-        assert!(style.get_source("points").is_none());
+        let (_runtime, map, base) = map(BASE);
+        let (held, _) = change(&map, &base, &Content::default(), &content(&dots("red")), &HashMap::new());
+        let (held, errors) = change(&map, &base, &held, &Content::default(), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(layers(&map), ["water", "labels"]);
+        assert!(map.style_source("points").unwrap().wait().unwrap().is_none());
         assert_eq!(held, Content::default());
     }
 
     #[test]
     fn an_image_comes_in_once_it_is_decoded_and_goes_with_the_content() {
-        let mut style = style();
+        let (_runtime, map, base) = map(BASE);
+        let image = |map: &Map| map.style_image("pin").unwrap().wait().unwrap();
         let pin = content(r#"{"images":{"pin":"assets/pin.png"}}"#);
-        let (held, _, _) = apply(&mut style, &Content::default(), &pin, &HashMap::new());
-        assert!(style.get_image("pin").is_none());
+        let (held, _) = change(&map, &base, &Content::default(), &pin, &HashMap::new());
+        assert!(image(&map).is_none());
         let decoded =
             HashMap::from([("assets/pin.png".to_owned(), PremultipliedImage::new(mln_util::size::Size::new(4, 4)))]);
-        let (held, errors, _) = apply(&mut style, &held, &pin, &decoded);
-        assert_eq!(errors, Vec::<String>::new());
-        assert!(style.get_image("pin").is_some());
-        apply(&mut style, &held, &Content::default(), &decoded);
-        assert!(style.get_image("pin").is_none());
+        let (held, errors) = change(&map, &base, &held, &pin, &decoded);
+        assert_eq!(errors, Vec::new());
+        assert!(image(&map).is_some());
+        change(&map, &base, &held, &Content::default(), &decoded);
+        assert!(image(&map).is_none());
     }
 
     #[test]
     fn a_layer_that_fails_is_left_out_and_reported() {
-        let mut style = style();
+        let (_runtime, map, base) = map(BASE);
         let bad = r#"{"layers":[{"id":"x","type":"blob"}]}"#;
-        let (held, errors, _) = apply(&mut style, &Content::default(), &content(bad), &HashMap::new());
+        let (held, errors) = change(&map, &base, &Content::default(), &content(bad), &HashMap::new());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(held.layers.is_empty());
     }
 
     #[test]
     fn root_properties_go_over_the_base_styles_and_give_it_back() {
-        let mut style = Style::new(1.0);
-        style.load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"mercator"}}"#);
+        let (_runtime, map, base) =
+            map(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"mercator"}}"#);
+        let projection = |map: &Map| map.style_root_property("projection").unwrap().wait().unwrap();
         let globe = content(r#"{"projection":{"type":"globe"},"terrain":{"source":"dem"}}"#);
-        let (held, errors, unsupported) = apply(&mut style, &Content::default(), &globe, &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(unsupported.len(), 1, "terrain: {unsupported:?}");
-        assert_eq!(style.root_property_json("projection").unwrap().as_deref(), Some(r#"{"type":"globe"}"#));
-        // Terrain is reported once, not again on the next change.
-        let (held, _, unsupported) = apply(&mut style, &held, &globe, &HashMap::new());
-        assert!(unsupported.is_empty());
-        apply(&mut style, &held, &Content::default(), &HashMap::new());
-        assert_eq!(style.root_property_json("projection").unwrap().as_deref(), Some(r#"{"type":"mercator"}"#));
+        let (held, errors) = change(&map, &base, &Content::default(), &globe, &HashMap::new());
+        assert_eq!(errors, [("terrain".to_owned(), ErrorKind::Unsupported)]);
+        assert_eq!(projection(&map).as_deref(), Some(r#"{"type":"globe"}"#));
+        // Terrain stays held, so it is reported once, not again on the next change.
+        let (held, errors) = change(&map, &base, &held, &globe, &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        change(&map, &base, &held, &Content::default(), &HashMap::new());
+        assert_eq!(projection(&map).as_deref(), Some(r#"{"type":"mercator"}"#));
     }
 
     #[test]
     fn state_sets_global_state_and_dropping_it_gives_back_the_default() {
-        let mut style = Style::new(1.0);
-        style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"chosen":{"default":""}}}"#);
-        let (held, errors, _) =
-            apply(&mut style, &Content::default(), &content(r#"{"state":{"chosen":"hb"}}"#), &HashMap::new());
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(style.global_state_json(), r#"{"chosen":"hb"}"#);
-        apply(&mut style, &held, &Content::default(), &HashMap::new());
-        assert_eq!(style.global_state_json(), r#"{"chosen":""}"#);
+        let (_runtime, map, base) =
+            map(r#"{"version":8,"sources":{},"layers":[],"state":{"chosen":{"default":""}}}"#);
+        let state = |map: &Map| map.global_state().unwrap().wait().unwrap();
+        let (held, errors) =
+            change(&map, &base, &Content::default(), &content(r#"{"state":{"chosen":"hb"}}"#), &HashMap::new());
+        assert_eq!(errors, Vec::new());
+        assert_eq!(state(&map), r#"{"chosen":"hb"}"#);
+        change(&map, &base, &held, &Content::default(), &HashMap::new());
+        assert_eq!(state(&map), r#"{"chosen":""}"#);
     }
 }

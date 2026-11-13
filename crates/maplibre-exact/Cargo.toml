@@ -11,13 +11,12 @@ default = ["mln"]
 # The map drawn by mln-rs on Exact's GPU canvas.
 mln = [
     "dep:feature",
-    "dep:mln_actor",
     "dep:mln_conversion",
     "dep:mln_gestures",
-    "dep:mln_gfx",
     "dep:mln_image",
     "dep:mln_map",
     "dep:mln_renderer",
+    "dep:mln_runtime",
     "dep:mln_style",
     "dep:mln_util",
     "dep:mln_webgpu",
@@ -29,13 +28,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 feature = { package = "mln-rs-feature", path = "../../../mln-rs/vendor/feature", optional = true }
-mln_actor = { package = "mln-rs-actor", path = "../../../mln-rs/crates/mln_actor", optional = true }
 mln_conversion = { package = "mln-rs-conversion", path = "../../../mln-rs/crates/mln_conversion", optional = true }
 mln_gestures = { package = "mln-rs-gestures", path = "../../../mln-rs/crates/mln_gestures", optional = true }
-mln_gfx = { package = "mln-rs-gfx", path = "../../../mln-rs/crates/mln_gfx", optional = true }
 mln_image = { package = "mln-rs-image", path = "../../../mln-rs/crates/mln_image", optional = true }
 mln_map = { package = "mln-rs-map", path = "../../../mln-rs/crates/mln_map", optional = true }
+# Only for its font-face shaper, which the runtime's renderer then has.
 mln_renderer = { package = "mln-rs-renderer", path = "../../../mln-rs/crates/mln_renderer", optional = true, features = ["font-face-shaper"] }
+mln_runtime = { package = "mln-rs-runtime", path = "../../../mln-rs/crates/mln_runtime", optional = true, default-features = false, features = ["webgpu"] }
 mln_style = { package = "mln-rs-style", path = "../../../mln-rs/crates/mln_style", optional = true }
 mln_util = { package = "mln-rs-util", path = "../../../mln-rs/crates/mln_util", optional = true }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../../../mln-rs/crates/mln_webgpu", optional = true }

@@ -10,7 +10,7 @@
 //! map; elsewhere (Android) the host draws them where the placement says.
 
 use exact_gpu::{Placement, wgpu};
-use mln_map::Map;
+use mln_map::MapProjection;
 use mln_util::geo::LatLng;
 
 use crate::protocol::Marker;
@@ -58,18 +58,24 @@ impl Children {
         self.children.get(index)?.as_ref()?.placement
     }
 
-    /// Places each child a marker names at its marker's point on `map`, as
-    /// the map is drawn now, on a canvas of `size` points at `scale` pixels a
-    /// point. A marker whose child lies off the canvas or behind the globe is
-    /// hidden, so it is neither hit nor read out.
-    pub(super) fn place(&mut self, map: &Map, markers: &[Marker], size: [f32; 2], scale: f32) {
-        let camera = map.get_camera_options(None);
-        let view =
-            View { bearing: camera.bearing.unwrap_or_default(), pitch: camera.pitch.unwrap_or_default(), size, scale };
+    /// Places each child a marker names at its marker's point, through
+    /// `projection` of the map as drawn, turned by `bearing` and tilted by
+    /// `pitch`, on a canvas of `size` points at `scale` pixels a point. A
+    /// marker whose child lies off the canvas or behind the globe is hidden,
+    /// so it is neither hit nor read out.
+    pub(super) fn place(
+        &mut self,
+        projection: &MapProjection,
+        [bearing, pitch]: [f64; 2],
+        markers: &[Marker],
+        size: [f32; 2],
+        scale: f32,
+    ) {
+        let view = View { bearing, pitch, size, scale };
         for (index, child) in self.children.iter_mut().enumerate() {
             let Some(child) = child else { continue };
             let marker = markers.iter().find(|marker| marker.id == child.name);
-            child.placement = marker.and_then(|marker| place(map, &view, marker, child.frame, index));
+            child.placement = marker.and_then(|marker| place(projection, &view, marker, child.frame, index));
         }
     }
 
@@ -177,7 +183,7 @@ struct View {
 /// rotation, less the bearing when it turns with the map, and squashed as the
 /// map pitches when it lies on the map. An upright child sits on whole pixels,
 /// so that its pixels stay sharp. `None` leaves the child to the layout.
-fn place(map: &Map, view: &View, marker: &Marker, frame: [f32; 4], index: usize) -> Option<Placement> {
+fn place(projection: &MapProjection, view: &View, marker: &Marker, frame: [f32; 4], index: usize) -> Option<Placement> {
     let [width, height] = [f64::from(frame[2]), f64::from(frame[3])];
     let [ax, ay] = marker.anchor.fraction();
     let [ax, ay] = [ax * width, ay * height];
@@ -187,8 +193,8 @@ fn place(map: &Map, view: &View, marker: &Marker, frame: [f32; 4], index: usize)
     let point = match marker.lng_lat {
         Some([lng, lat]) => LatLng::new(lat, lng)
             .ok()
-            .filter(|at| !map.is_location_occluded(at))
-            .map(|at| map.pixel_for_lat_lng(&at))
+            .filter(|at| !projection.is_location_occluded(at))
+            .map(|at| projection.pixel_for_lat_lng(&at))
             .filter(|point| point.x.is_finite() && point.y.is_finite())
             .map(|point| [point.x, point.y]),
         None if upright && marker.offset == [0.0, 0.0] => return None,
@@ -320,7 +326,7 @@ impl Gpu {
 
 #[cfg(test)]
 mod tests {
-    use mln_map::{CameraOptions, MapOptions};
+    use mln_map::{CameraOptions, Map, MapOptions};
     use mln_util::size::Size;
 
     use super::*;
@@ -328,16 +334,17 @@ mod tests {
 
     /// A 400×300 map looking straight down at 0, 0 at zoom 2, turned and
     /// pitched as given.
-    fn map(bearing: f64, pitch: f64) -> (Map, View) {
-        let mut map = Map::new(MapOptions::new().with_size(Size::new(400, 300)).with_pixel_ratio(1.0)).unwrap();
-        map.jump_to(
-            &CameraOptions::default()
-                .with_center(LatLng::new(0.0, 0.0).ok())
-                .with_zoom(Some(2.0))
-                .with_bearing(Some(bearing))
-                .with_pitch(Some(pitch)),
-        );
-        (map, View { bearing, pitch, size: [400.0, 300.0], scale: 2.0 })
+    fn map(bearing: f64, pitch: f64) -> (MapProjection, View) {
+        let options = MapOptions { size: Size::new(400, 300), pixel_ratio: 1.0, ..MapOptions::default() };
+        let mut map = Map::new(options).unwrap();
+        map.jump_to(&CameraOptions {
+            center: LatLng::new(0.0, 0.0).ok(),
+            zoom: Some(2.0),
+            bearing: Some(bearing),
+            pitch: Some(pitch),
+            ..CameraOptions::default()
+        });
+        (MapProjection::new(&map), View { bearing, pitch, size: [400.0, 300.0], scale: 2.0 })
     }
 
     fn marker(lng_lat: Option<[f64; 2]>) -> Marker {
