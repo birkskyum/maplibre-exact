@@ -29,7 +29,6 @@
 
 #[cfg(target_os = "macos")]
 pub mod macos;
-mod map;
 
 pub use maplibre_rust_ui::model;
 use nsh_core::prelude::*;

@@ -96,7 +96,9 @@ A render session attached to the map draws it into what the host gives it.
   renders on a thread of its own. Native Shell gives the map a native view of its own, and on macOS its
   host makes that view's layer a `CAMetalLayer` and hands the session a wgpu surface of it, made on the
   main thread. Whisker's views are Swift and Kotlin, so its host will hand Rust the layer or surface
-  from there.
+  from there. Both drive the map through the core's `Component`, which takes props, commands and
+  input and returns the events to post. A covered macOS window gets no drawables, so the map draws
+  nothing there, and a click finds its features in the last frame drawn.
 
 The map's animation clock is the host's, so `flyTo` and the momentum of a release follow an agent's
 `clock` as everything else in an Exact app does. The runtime has no call for it yet, so the engine sets

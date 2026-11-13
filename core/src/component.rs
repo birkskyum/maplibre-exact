@@ -1,17 +1,20 @@
-//! A map component's state, whichever platform shows it: the map its props
-//! declare, the engine once the view has a size, and the input and frames
-//! the view hands it.
+//! A map as a component of a UI whose views are the platform's own, as in
+//! Native Shell and Whisker: the map its props declare, in JSON, the engine
+//! once the view has a size, and the input and frames the view hands it. The
+//! host gives each frame a target of the view, such as its Metal layer, and
+//! posts the app the events each frame returns.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use maplibre_rust_ui::gestures::{Button, Input, Modifiers, PointerKind};
-use maplibre_rust_ui::model::{Camera, Command, Content, Event, Inputs, Options, Record};
-use maplibre_rust_ui::runtime::{Driver, RenderTarget};
-use maplibre_rust_ui::util::geo::ScreenCoordinate;
-use maplibre_rust_ui::util::image::PremultipliedImage;
-use maplibre_rust_ui::{Engine, Phase, Pointer, Viewport};
+use mln_gestures::{Button, Input, Modifiers, PointerKind};
+use mln_runtime::{Driver, RenderTarget};
+use mln_util::geo::ScreenCoordinate;
+use mln_util::image::PremultipliedImage;
 use serde_json::Value as Json;
+
+use crate::model::{Camera, Command, Content, Event, Inputs, Options, Record};
+use crate::{Engine, Phase, Pointer, Viewport};
 
 /// The events a map posts when its props name none.
 const ALL_EVENTS: [Event; 5] = [Event::Load, Event::Moveend, Event::Click, Event::Contextmenu, Event::Error];
@@ -20,13 +23,15 @@ const ALL_EVENTS: [Event; 5] = [Event::Load, Event::Moveend, Event::Click, Event
 const WORLD: Camera = Camera { center: [0.0, 0.0], zoom: 0.0, bearing: 0.0, pitch: 0.0 };
 
 /// What a map posts to its app: an event's name, with the map's record.
-pub(crate) struct Post {
+pub struct Post {
     pub name: &'static str,
     pub data: Json,
 }
 
-/// A pointer as the view reports it.
-pub(crate) struct Press {
+/// A pointer as the view reports it, in logical pixels from its top-left
+/// corner.
+#[derive(Clone, Copy, Debug)]
+pub struct Press {
     pub id: u32,
     pub phase: Phase,
     pub x: f64,
@@ -36,7 +41,9 @@ pub(crate) struct Press {
     pub modifiers: Modifiers,
 }
 
-pub(crate) struct MapState {
+/// A map whose props, commands and input come from a view of the platform's
+/// own. Its props are `style`, `camera`, `content`, `options` and `events`.
+pub struct Component {
     inputs: Inputs,
     engine: Option<Engine>,
     /// Commands sent before the map was made.
@@ -52,9 +59,18 @@ pub(crate) struct MapState {
     epoch: Instant,
 }
 
-impl MapState {
-    pub fn new() -> MapState {
-        MapState {
+impl Default for Component {
+    fn default() -> Component {
+        Component::new()
+    }
+}
+
+impl Component {
+    /// A map of the whole world, made once its view has a size and its
+    /// props a style.
+    #[must_use]
+    pub fn new() -> Component {
+        Component {
             inputs: Inputs {
                 style: String::new(),
                 camera: WORLD,
@@ -72,7 +88,12 @@ impl MapState {
         }
     }
 
-    /// Prop `name` changed to `value`, or went with `None`.
+    /// Prop `name` changed to `value`, or went with `None`: `style`, a URL or
+    /// a document; `camera`, `{"center": [lng, lat], "zoom", "bearing",
+    /// "pitch"}`; `content` ([`Content`]) and `options` ([`Options`]), which
+    /// may be strings of their JSON; and `events`, the names of the events
+    /// to post, all of them without one. A malformed prop fails, which the
+    /// next frame posts as an `error`.
     pub fn set_prop(&mut self, name: &str, value: Option<&Json>) {
         let changed = match name {
             "style" => {
@@ -169,6 +190,8 @@ impl MapState {
     /// style, rendering into the target `target` makes for its viewport,
     /// then takes the props and runs the gestures and the map. Returns
     /// whether the map wants another frame, and what to post to the app.
+    /// A host runs frames while the map wants them, and again when a prop,
+    /// a command, input or the view's size reaches it.
     pub fn frame(
         &mut self,
         target: impl FnOnce(Viewport) -> Result<(RenderTarget, Driver), String>,
@@ -279,7 +302,7 @@ mod tests {
 
     #[test]
     fn props_declare_the_map() {
-        let mut state = MapState::new();
+        let mut state = Component::new();
         state.set_prop("style", Some(&Json::from("https://tiles.openfreemap.org/styles/liberty")));
         state.set_prop("camera", Some(&serde_json::json!({"center": [8.54, 47.37], "zoom": 11})));
         state.set_prop("events", Some(&serde_json::json!(["load", "click"])));
@@ -295,7 +318,7 @@ mod tests {
 
     #[test]
     fn a_malformed_prop_is_a_failure_the_app_hears_of() {
-        let mut state = MapState::new();
+        let mut state = Component::new();
         state.set_prop("camera", Some(&serde_json::json!({"zoom": "near"})));
         state.set_prop("events", Some(&Json::from("load nothing")));
         let (again, posts) = state.frame(|_| Err("no target".to_owned()));
@@ -317,7 +340,7 @@ mod tests {
 
     #[test]
     fn commands_wait_for_the_map() {
-        let mut state = MapState::new();
+        let mut state = Component::new();
         state.command("flyTo", &serde_json::json!({"center": [8.54, 47.37], "zoom": 14}));
         state.command("jumpTo", &Json::from(3));
         assert_eq!(state.pending.len(), 1);

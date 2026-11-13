@@ -7,12 +7,15 @@
 //! map. [`Engine`] draws that map with mln-rs's runtime, into what the host
 //! gives it: its own textures, which the host then draws, or a surface of a
 //! native view. Each framework's host lives in a crate of its own, such as
-//! `maplibre-exact`, and builds on this one.
+//! `maplibre-exact`, and builds on this one. A host whose map is a native
+//! view with props in JSON, as Native Shell's and Whisker's are, drives the
+//! engine through a [`component::Component`].
 //!
 //! The mln-rs crates a host needs are re-exported, so that a host and the
 //! engine agree on one version of them.
 
 mod camera;
+pub mod component;
 mod content;
 mod engine;
 pub mod model;

@@ -62,6 +62,9 @@ cargo run -p hello-map-nsh
 HELLO_MAP_SNAPSHOTS=/tmp/hello-map cargo run -p hello-map-nsh   # a short walk, saved as PNG files
 ```
 
+The walk's window opens behind the others, on a second display where there is one, since a covered
+window gets no frames.
+
 ## Not done yet
 
 - iOS, where a Rust component gives a `UIView`, the same way.

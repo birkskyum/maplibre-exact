@@ -16,7 +16,8 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
 - [`core`](core) is the `maplibre-rust-ui` crate: the map an app declares
   ([`model.rs`](core/src/model.rs)), and the engine that draws it with mln-rs's runtime into what a host
   gives it, the host's own textures or a surface of a native view. It also places markers, the app's
-  own views held at places on the map, as GL JS's `Marker` does.
+  own views held at places on the map, as GL JS's `Marker` does, and has the map as a component with
+  props in JSON ([`component.rs`](core/src/component.rs)), which hosts of native views drive.
 - [`exact`](exact) is `maplibre-exact`, the map in [Exact](https://github.com/expo/exact) apps, on
   Exact's GPU canvas. It runs on macOS, iOS and Android. [Its README](exact/README.md) says how to use
   it and run its example.

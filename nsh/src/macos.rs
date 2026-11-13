@@ -22,8 +22,9 @@ use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NS
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSTimer};
 use objc2_quartz_core::{CALayer, CAMetalLayer};
 
+use maplibre_rust_ui::component::{Component, Press};
+
 use crate::NAME;
-use crate::map::{MapState, Press};
 
 /// Registers the map, `maplibre.map`, on `components`: the app calls it from
 /// its `#[native_components(macos)]` function, or before `run_app` through
@@ -50,7 +51,7 @@ fn device() -> Result<&'static webgpu::Device, String> {
 /// What the component and its view share: the map, the layer it renders
 /// into, and the timer that runs its frames while it wants them.
 struct Shared {
-    state: RefCell<MapState>,
+    state: RefCell<Component>,
     layer: Retained<CAMetalLayer>,
     context: ComponentContext,
     timer: RefCell<Option<Retained<NSTimer>>>,
@@ -124,7 +125,7 @@ impl MapComponent {
         let layer = CAMetalLayer::new();
         layer.setOpaque(true);
         let shared =
-            Rc::new(Shared { state: RefCell::new(MapState::new()), layer, context, timer: RefCell::new(None) });
+            Rc::new(Shared { state: RefCell::new(Component::new()), layer, context, timer: RefCell::new(None) });
         let view = MapView::alloc(mtm).set_ivars(Rc::downgrade(&shared));
         // SAFETY: NSView's designated initializer.
         let view: Retained<MapView> = unsafe { msg_send![super(view), initWithFrame: NSRect::ZERO] };

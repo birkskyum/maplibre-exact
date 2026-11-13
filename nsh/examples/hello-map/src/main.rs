@@ -4,14 +4,18 @@
 #[cfg(target_os = "macos")]
 fn main() -> impl std::process::Termination {
     use nsh_platform_macos as platform;
+    let walking = std::env::var_os("HELLO_MAP_SNAPSHOTS").is_some();
     platform::set_components(maplibre_nsh::register);
     platform::run_app(
         platform::AppSource::Rust(platform::Root::of::<hello_map_nsh::App>()),
         platform::AppOptions {
             title: "Hello Map".to_owned(),
             size: (900, 640),
-            // The walk's window shows without taking the screen's front.
-            background: std::env::var_os("HELLO_MAP_SNAPSHOTS").is_some(),
+            // The walk's window shows without taking the front, on a display
+            // besides the one in use, as nsh's own test runs do: a covered
+            // window gets no frames.
+            background: walking,
+            display: walking.then_some(platform::WindowDisplay::Secondary),
             ..Default::default()
         },
     )
