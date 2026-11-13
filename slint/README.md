@@ -71,7 +71,7 @@ HELLO_MAP_SNAPSHOTS=/tmp/hello-map cargo run -p hello-map-slint   # a short walk
 ```
 
 The walk's window has no frame and sits far past the edges of the screens, where the system leaves a
-frameless window, so nothing shows: its snapshots render on their own. It quits at once should the
+frameless window, so nothing shows, and its snapshots render on their own. It quits at once should the
 window land on a screen.
 
 ## Not done yet
