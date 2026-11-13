@@ -20,12 +20,14 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
 - [`exact`](exact) is `maplibre-exact`, the map in [Exact](https://github.com/expo/exact) apps, on
   Exact's GPU canvas. It runs on macOS, iOS and Android. [Its README](exact/README.md) says how to use
   it and run its example.
-
 - [`slint`](slint) is `maplibre-slint`, the map in [Slint](https://slint.dev) apps, on Slint's wgpu
   renderer. It runs on macOS. [Its README](slint/README.md) says how to use it.
+- [`nsh`](nsh) is `maplibre-nsh`, the map in [Native Shell](https://nsh.dev) apps, as a native
+  component whose view the map renders into. It runs on macOS. [Its README](nsh/README.md) says how to
+  use it.
 
-Hosts for [Whisker](https://whisker.rs) and [Native Shell](https://nsh.dev) come next. Each host folder
-builds on the core alone, and becomes a repository of its own once the core's API settles.
+A host for [Whisker](https://whisker.rs) comes next. Each host folder builds on the core alone, and
+becomes a repository of its own once the core's API settles.
 
 ## Building
 

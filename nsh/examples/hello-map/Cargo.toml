@@ -1,0 +1,28 @@
+[package]
+name = "hello-map-nsh"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "A Native Shell app with a MapLibre map"
+publish = false
+
+[dependencies]
+maplibre-nsh = { path = "../.." }
+nsh-base = "0.5.0"
+nsh-core = "0.5.0"
+serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = "0.5.0"
+# Only for HELLO_MAP_SNAPSHOTS, whose walk taps the map and saves the window.
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSEvent",
+    "NSGraphicsContext",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry"] }

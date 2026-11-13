@@ -1,0 +1,40 @@
+[package]
+name = "maplibre-nsh"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps in Native Shell apps, drawn by mln-rs into a native view"
+publish = false
+
+[workspace]
+members = ["examples/hello-map"]
+
+[dependencies]
+maplibre-rust-ui = { path = "../core" }
+nsh-core = "0.5.0"
+serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+nsh-platform-macos = { version = "0.5.0", default-features = false }
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSEvent",
+    "NSGraphics",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "objc2-quartz-core",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "NSDate",
+    "NSGeometry",
+    "NSObjCRuntime",
+    "NSRunLoop",
+    "NSString",
+    "NSTimer",
+] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }

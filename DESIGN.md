@@ -93,8 +93,10 @@ A render session attached to the map draws it into what the host gives it.
   device's queue before the surface's draw, which samples the texture into Exact's target with one
   full-screen triangle. The next frame renders on a later service, after Exact submitted that draw.
 - **A surface.** A native view's Metal layer or Android surface takes the session's frames, which it
-  renders on a thread of its own. Whisker and Native Shell give the map a native view, so their hosts
-  will draw this way.
+  renders on a thread of its own. Native Shell gives the map a native view of its own, and on macOS its
+  host makes that view's layer a `CAMetalLayer` and hands the session a wgpu surface of it, made on the
+  main thread. Whisker's views are Swift and Kotlin, so its host will hand Rust the layer or surface
+  from there.
 
 The map's animation clock is the host's, so `flyTo` and the momentum of a release follow an agent's
 `clock` as everything else in an Exact app does. The runtime has no call for it yet, so the engine sets
@@ -180,6 +182,11 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
 3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
+4. **A view's surface on a session of its own thread on macOS.** A session builds a window's surface
+   on the thread that renders, and wgpu takes an AppKit view's layer only on the main thread, so a
+   session on `Driver::CoreWorker` given `Surface::window` of an `NSView` panics ("can only access
+   NSView on the main thread"). Native Shell's host makes the wgpu surface from the view's layer
+   itself, on the main thread, and hands it over with `Surface::wgpu`.
 
 Two needs are met. A host renders into its own textures with `BorrowedTarget`, on every mln-rs
 backend, and mln-rs trusts Android's system certificates when the app gives it no Java VM
@@ -187,7 +194,10 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 
 ## Where it runs
 
-- macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
+- Slint and Native Shell on macOS: the style, the content's places, `flyTo`, a tap naming a place
+  and `fitBounds`, each in a scripted walk that saves the window.
+
+- Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
   attribution. The callout marker and its button, clusters zooming in, camera padding and a
   right-click on macOS, and the callout, the compass and a long press on Android and on the
@@ -207,5 +217,5 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- The hosts for Whisker, Native Shell and Slint.
+- The host for Whisker, and the Native Shell and Slint hosts beyond macOS.
 - MapLibre Native as the engine, through maplibre-native-ffi.
