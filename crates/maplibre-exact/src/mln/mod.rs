@@ -2,9 +2,9 @@
 //!
 //! Exact calls a surface on one thread, so the surface keeps its mln-rs map
 //! there and runs that thread's mln-rs `RunLoop` once a frame. mln-rs renders
-//! on Exact's device into a texture of its own and submits that frame itself,
-//! and the surface then draws the texture into Exact's target with the encoder it
-//! is given, which Exact submits after. The surface asks for frames while the
+//! on Exact's device into a texture of the surface's and submits that frame
+//! itself, and the surface then draws the texture into Exact's target with the
+//! encoder it is given, which Exact submits after. The surface asks for frames while the
 //! map loads, animates or follows a gesture, and for none once it is idle.
 //!
 //! The map's animations run on the host's clock, so they follow an agent's
@@ -14,6 +14,7 @@ mod blit;
 mod content;
 mod input;
 mod markers;
+mod target;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -25,7 +26,10 @@ use exact_gpu::{
 use mln_actor::RunLoop;
 use mln_gestures::{GestureEvent, GestureOptions, GestureRecognizer};
 use mln_gfx::{BackendScope, ScopeType};
-use mln_map::{AnimationOptions, BoundOptions, CameraOptions, Map, MapEvent, MapOptions, MapProjection, UpdateReader};
+use mln_map::{
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent, MapOptions, MapProjection,
+    UpdateReader,
+};
 use mln_renderer::Renderer;
 use mln_renderer::query::RenderedQueryOptions;
 use mln_util::chrono::{Clock, Duration, TimePoint};
@@ -81,7 +85,7 @@ pub struct MapSurface {
 struct Engine {
     // Dropped in this order, the renderer before its map and backend.
     renderer: Renderer,
-    target: mln_webgpu::OffscreenTarget,
+    target: Option<target::MapTarget>,
     map: Map,
     updates: UpdateReader,
     backend: Rc<mln_webgpu::RendererBackend>,
@@ -186,8 +190,8 @@ impl Surface for MapSurface {
         let wants_frame = engine.frame(frame, &self.decoded, &mut events);
         let size = [frame.width, frame.height];
         self.children.place(&engine.map, &inputs.content.markers, size, frame.scale);
-        if let Some(texture) = engine.target.color_texture() {
-            engine.blit.draw(device, encoder, target, format, &texture);
+        if let Some(texture) = engine.target.as_ref().and_then(target::MapTarget::frame) {
+            engine.blit.draw(device, encoder, target, format, texture);
             self.children.draw(device, queue, encoder, target, format, size);
         }
         if let Some(refusal) = engine.refusal.take() {
@@ -255,7 +259,7 @@ impl Surface for MapSurface {
     }
 
     fn frame_ready(&self) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.target.color_texture().is_some())
+        self.engine.as_ref().is_some_and(|engine| engine.target.as_ref().and_then(target::MapTarget::frame).is_some())
     }
 
     fn device_lost(&mut self) {
@@ -352,7 +356,7 @@ impl Engine {
         let device = mln_webgpu::Device::from_wgpu(None, device.clone(), queue.clone(), None);
         let backend = Rc::new(mln_webgpu::RendererBackend::new(&device));
         let (width, height) = frame.pixels();
-        let target = mln_webgpu::OffscreenTarget::new(backend.clone(), Size::new(width, height));
+        let target = target::MapTarget::new(&backend, Size::new(width, height))?;
         let size = logical_size(frame);
         let mut renderer = Renderer::new(backend.clone(), frame.scale, None);
         let mut map = Map::new(MapOptions::new().with_size(size).with_pixel_ratio(frame.scale))
@@ -515,15 +519,17 @@ impl Engine {
         match command {
             Command::JumpTo(change) => self.map.jump_to(&camera_options(&change)),
             Command::EaseTo(animation) => {
-                self.map.ease_to(&camera_options(&animation.camera), &animation_options(animation.duration));
+                let camera = camera_options(&animation.camera);
+                self.animate(CameraUpdateMode::Ease, camera, animation_options(animation.duration));
             }
             Command::FlyTo(animation) => {
-                self.map.fly_to(&camera_options(&animation.camera), &animation_options(animation.duration));
+                let camera = camera_options(&animation.camera);
+                self.animate(CameraUpdateMode::Fly, camera, animation_options(animation.duration));
             }
             Command::FitBounds { bounds, padding, duration } => {
                 match self.camera_for_bounds(bounds, padding.unwrap_or_default()) {
                     Ok(camera) if duration == Some(0.0) => self.map.jump_to(&camera),
-                    Ok(camera) => self.map.ease_to(&camera, &animation_options(duration)),
+                    Ok(camera) => self.animate(CameraUpdateMode::Ease, camera, animation_options(duration)),
                     Err(e) => self.error = Some(format!("maplibre: fitBounds: {}", e.message)),
                 }
             }
@@ -539,6 +545,10 @@ impl Engine {
     /// The camera that shows `bounds` with `padding` points to spare inside
     /// the map's own padding, as GL JS's `fitBounds` finds it: the map keeps
     /// its padding, and the center moves to make up for an uneven `padding`.
+    fn animate(&mut self, mode: CameraUpdateMode, camera: CameraOptions, animation: AnimationOptions) {
+        self.map.update_camera(&CameraUpdate { mode, camera, animation, ..CameraUpdate::default() });
+    }
+
     fn camera_for_bounds(&self, bounds: [[f64; 2]; 2], padding: Padding) -> Result<CameraOptions, mln_util::Error> {
         let [[west, south], [east, north]] = bounds;
         let kept = self.map.get_camera_options(None).padding.unwrap_or_default();
@@ -727,7 +737,9 @@ impl Engine {
         self.drawn = update.generation;
         let backend: Rc<dyn mln_gfx::RendererBackend> = self.backend.clone();
         let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-        self.renderer.render(&update.parameters, &self.target);
+        if let Some(target) = self.target.as_mut() {
+            target.render(&mut self.renderer, &update.parameters);
+        }
     }
 
     fn resize(&mut self, frame: &Frame) {
@@ -740,7 +752,9 @@ impl Engine {
             self.pixel_ratio = frame.scale;
         }
         let (width, height) = frame.pixels();
-        self.target.resize(Size::new(width, height));
+        if let Err(message) = target::MapTarget::resize(&mut self.target, &self.backend, Size::new(width, height)) {
+            self.refusal = Some(message);
+        }
     }
 
     fn attribution(&self) -> String {
