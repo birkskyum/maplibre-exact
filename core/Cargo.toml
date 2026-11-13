@@ -1,10 +1,15 @@
 [package]
 name = "maplibre-rust-ui"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "MapLibre maps for Rust UI frameworks: the map an app declares, on mln-rs's runtime"
-publish = false
+description = "MapLibre maps for Rust UI frameworks, declared once and drawn by mln-rs"
+repository = "https://github.com/birkskyum/maplibre-rust-ui"
+homepage = "https://birkskyum.github.io/maplibre-rust-ui/"
+documentation = "https://birkskyum.github.io/maplibre-rust-ui/api/maplibre_rust_ui/"
+readme = "README.md"
+keywords = ["maplibre", "map", "gis", "vector-tiles", "gui"]
+categories = ["gui", "science::geo", "rendering"]
 
 # Its own workspace, so that its tests build it alone.
 [workspace]

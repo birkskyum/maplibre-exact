@@ -4302,7 +4302,7 @@ dependencies = [
 
 [[package]]
 name = "maplibre-bevy"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bevy",
  "maplibre-rust-ui",
@@ -4310,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "maplibre-rust-ui"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-feature",

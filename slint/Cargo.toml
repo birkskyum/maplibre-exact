@@ -1,10 +1,15 @@
 [package]
 name = "maplibre-slint"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "MapLibre maps in Slint apps, drawn by mln-rs on Slint's wgpu renderer"
-publish = false
+repository = "https://github.com/birkskyum/maplibre-rust-ui"
+homepage = "https://birkskyum.github.io/maplibre-rust-ui/hosts/slint/"
+documentation = "https://birkskyum.github.io/maplibre-rust-ui/hosts/slint/"
+readme = "README.md"
+keywords = ["maplibre", "map", "slint", "gis", "gui"]
+categories = ["gui", "science::geo"]
 # Gives the build scripts of the crates that depend on this one the path of
 # its Slint library, as `DEP_MAPLIBRE_SLINT_UI`.
 links = "maplibre-slint"
@@ -14,5 +19,5 @@ build = "build.rs"
 members = ["examples/hello-map"]
 
 [dependencies]
-maplibre-rust-ui = { path = "../core" }
+maplibre-rust-ui = { path = "../core", version = "0.1.0" }
 slint = { version = "1.18", features = ["unstable-wgpu-30", "renderer-femtovg-wgpu"] }

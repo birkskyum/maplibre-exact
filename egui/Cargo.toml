@@ -1,10 +1,15 @@
 [package]
 name = "maplibre-egui"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "MapLibre maps in egui apps, drawn by mln-rs on egui's wgpu renderer"
-publish = false
+repository = "https://github.com/birkskyum/maplibre-rust-ui"
+homepage = "https://birkskyum.github.io/maplibre-rust-ui/hosts/egui/"
+documentation = "https://birkskyum.github.io/maplibre-rust-ui/hosts/egui/"
+readme = "README.md"
+keywords = ["maplibre", "map", "egui", "gis", "gui"]
+categories = ["gui", "science::geo"]
 
 [workspace]
 members = ["examples/hello-map"]
@@ -12,4 +17,4 @@ members = ["examples/hello-map"]
 [dependencies]
 egui = "0.37"
 egui-wgpu = "0.37"
-maplibre-rust-ui = { path = "../core" }
+maplibre-rust-ui = { path = "../core", version = "0.1.0" }

@@ -36,3 +36,10 @@ cd maplibre-rust-ui/core && cargo test
 ```
 
 The docs build with `uvx zensical serve`, from this folder.
+
+## Releasing
+
+The core and the Slint, egui, Bevy, Native Shell and Whisker hosts go on crates.io. The Release
+workflow, run by hand, publishes each whose version in its `Cargo.toml` isn't there yet, the core
+first, and tags it. A new version of the core needs the hosts' `maplibre-rust-ui` versions raised with
+it, since each host is a workspace of its own.

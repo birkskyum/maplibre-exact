@@ -1,11 +1,16 @@
 [package]
 name = "maplibre-whisker"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "MapLibre maps in Whisker apps, drawn by mln-rs into a native view"
-publish = false
-include = ["Cargo.toml", "src/**/*.rs", "apple/Package.swift", "apple/**/*.swift", "android/build.gradle.kts", "android/**/*.kt"]
+repository = "https://github.com/birkskyum/maplibre-rust-ui"
+homepage = "https://birkskyum.github.io/maplibre-rust-ui/hosts/whisker/"
+documentation = "https://birkskyum.github.io/maplibre-rust-ui/hosts/whisker/"
+readme = "README.md"
+keywords = ["maplibre", "map", "whisker", "gis", "gui"]
+categories = ["gui", "science::geo"]
+include = ["Cargo.toml", "README.md", "src/**/*.rs", "apple/Package.swift", "apple/**/*.swift", "android/build.gradle.kts", "android/src/**/*.kt"]
 
 [workspace]
 members = ["examples/hello-map"]
@@ -21,7 +26,7 @@ ios = { manifest = "apple/Package.swift" }
 macos = { manifest = "apple/Package.swift" }
 
 [dependencies]
-maplibre-rust-ui = { path = "../core" }
+maplibre-rust-ui = { path = "../core", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 whisker = "0.18.1"

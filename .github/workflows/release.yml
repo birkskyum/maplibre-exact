@@ -1,0 +1,54 @@
+# Publishes the core and the hosts on crates.io, each at the version in its
+# Cargo.toml, the core first, and tags each published crate's commit
+# <crate>-v<version>. A crate whose version is on crates.io already is
+# skipped, so a run after one that stopped halfway publishes the rest. Each
+# host is its own workspace, so the hosts' versions of the core are bumped by
+# hand with the core's. GPUI's and Exact's hosts aren't published, since they
+# build on a changed GPUI and a patched Exact.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # The commit ci.yml builds against.
+  MLN_RS: 1102a74c3c03039179feb1d9d182430a8264927f
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: maplibre-rust-ui
+      - uses: actions/checkout@v7
+        with:
+          repository: louwers/mln-rs
+          ref: ${{ env.MLN_RS }}
+          path: mln-rs
+      - name: Publish
+        working-directory: maplibre-rust-ui
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in core slint egui bevy nsh whisker; do
+            name=$(grep -m1 '^name = ' "$crate/Cargo.toml" | cut -d'"' -f2)
+            version=$(grep -m1 '^version = ' "$crate/Cargo.toml" | cut -d'"' -f2)
+            if curl -sf -A "maplibre-rust-ui release" "https://crates.io/api/v1/crates/$name/$version" > /dev/null; then
+              echo "$name $version is on crates.io already"
+              continue
+            fi
+            (cd "$crate" && cargo publish)
+            git tag "$name-v$version"
+            git push origin "$name-v$version"
+          done
