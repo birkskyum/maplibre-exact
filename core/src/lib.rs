@@ -17,9 +17,10 @@ mod content;
 mod engine;
 pub mod model;
 pub mod placement;
+pub mod texture;
 
 pub use engine::{Engine, Phase, Pointer, Viewport};
 pub use {
     mln_gestures as gestures, mln_image as image, mln_map as map, mln_runtime as runtime, mln_util as util,
-    mln_webgpu as webgpu,
+    mln_webgpu as webgpu, wgpu,
 };

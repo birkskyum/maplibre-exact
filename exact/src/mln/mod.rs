@@ -10,7 +10,6 @@
 mod blit;
 mod input;
 mod markers;
-mod target;
 
 use std::collections::HashMap;
 
@@ -21,6 +20,7 @@ use exact_gpu::{
 use maplibre_rust_ui::map::MapProjection;
 use maplibre_rust_ui::placement::View;
 use maplibre_rust_ui::runtime::{Device, Driver, RenderTarget};
+use maplibre_rust_ui::texture::MapTexture;
 use maplibre_rust_ui::util::image::PremultipliedImage;
 use maplibre_rust_ui::util::size::Size;
 use maplibre_rust_ui::{Engine, Viewport};
@@ -39,7 +39,7 @@ pub struct MapSurface {
     inputs: Option<Inputs>,
     engine: Option<Engine>,
     /// The texture the engine renders into, on Exact's device.
-    texture: Option<target::MapTexture>,
+    texture: Option<MapTexture>,
     blit: Option<blit::Blit>,
     /// Commands posted before the map was made.
     pending: Vec<Command>,
@@ -87,7 +87,7 @@ impl Surface for MapSurface {
         let viewport = viewport(frame);
         let pixels = pixels(frame);
         if self.engine.is_none() {
-            let texture = target::MapTexture::new(device, pixels);
+            let texture = MapTexture::new(device, pixels);
             let shared = Device::WebGpu(maplibre_rust_ui::webgpu::Device::from_wgpu(
                 None,
                 device.clone(),
@@ -110,7 +110,7 @@ impl Surface for MapSurface {
         let (Some(engine), Some(texture)) = (self.engine.as_mut(), self.texture.as_mut()) else { return false };
         // A canvas of a new size gets a texture of its size, which resizes the map.
         if viewport != engine.viewport() || pixels != texture.pixels() {
-            let resized = target::MapTexture::new(device, pixels);
+            let resized = MapTexture::new(device, pixels);
             match engine.set_ring(viewport, resized.ring()) {
                 Ok(()) => *texture = resized,
                 Err(message) => self.error = Some(SurfaceError(message)),

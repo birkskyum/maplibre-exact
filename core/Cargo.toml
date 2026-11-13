@@ -24,3 +24,5 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../mln-rs/crates/mln_runt
 mln_style = { package = "mln-rs-style", path = "../../mln-rs/crates/mln_style" }
 mln_util = { package = "mln-rs-util", path = "../../mln-rs/crates/mln_util" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../../mln-rs/crates/mln_webgpu" }
+# mln-rs's, which hosts that draw with wgpu share.
+wgpu = { version = "30.0.1", default-features = false }

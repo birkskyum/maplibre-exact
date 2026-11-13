@@ -1313,6 +1313,7 @@ dependencies = [
  "mln-rs-webgpu",
  "serde",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]
