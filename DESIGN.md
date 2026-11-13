@@ -177,37 +177,36 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
 
 1. **A frame time in the runtime.** The engine sets the host's clock through `Map::with_core`, which
    reaches past the runtime's API.
-2. **Apple's own SQLite on Apple's platforms.** The SQLite that mln-rs builds in probes filesystem types
-   with `statfs`, which Apple counts as a disk-space API whose use an app's privacy manifest must give a
-   reason for, and none of Apple's reasons fits. Exact's iOS build refuses such an app, so the
-   prototype links the system's SQLite there ([`patches/mln-rs`](patches/mln-rs),
-   [louwers/mln-rs#344](https://github.com/louwers/mln-rs/pull/344)), as Exact's own crates do.
-3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
+2. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
-4. **A view's surface on a session of its own thread on macOS.** A session builds a window's surface
+3. **A view's surface on a session of its own thread on macOS.** A session builds a window's surface
    on the thread that renders, and wgpu takes an AppKit view's layer only on the main thread, so a
    session on `Driver::CoreWorker` given `Surface::window` of an `NSView` panics ("can only access
    NSView on the main thread"). Native Shell's host makes the wgpu surface from the view's layer
    itself, on the main thread, and hands it over with `Surface::wgpu`.
-5. **A surface that keeps presenting on Vulkan after the map rests.** After ten seconds without a
-   frame, the WebGPU surface asks to be reconfigured, and with its size unchanged it dropped the
-   frame's acquired texture unpresented. Metal takes such a drawable back, and Vulkan doesn't, so on
-   Android each rest of the map cost the swapchain an image, until none was left and the map stopped
-   drawing ("dequeueBuffer timed out"). The prototype keeps the texture for the frame to present
-   ([`patches/mln-rs`](patches/mln-rs),
-   [louwers/mln-rs#343](https://github.com/louwers/mln-rs/pull/343)).
-6. **The gesture recognizer's camera trait, events and options, public.** mln-rs keeps public only
-   what its own crates use, and its examples drive the recognizer with an `mln_map::Map` on their
-   thread. A host on the runtime has the map on the runtime's thread, so its camera reads the map's
-   snapshot and sends the recognizer's deltas as commands, which takes implementing `GestureCamera`
-   outside mln-rs. The prototype exports it again, with `GestureEvent`, and `GestureOptions` with
-   switches for rotating, pitching and scroll zoom, and the recognizer's `options` and `set_options`
-   ([`patches/mln-rs`](patches/mln-rs), [louwers/mln-rs#350](https://github.com/louwers/mln-rs/pull/350)).
 
-Two needs are met. A host renders into its own textures with `BorrowedTarget`, on every mln-rs
-backend, and mln-rs trusts Android's system certificates when the app gives it no Java VM
-([louwers/mln-rs#307](https://github.com/louwers/mln-rs/pull/307)).
+Five needs are met.
+
+- A host renders into its own textures with `BorrowedTarget`, on every mln-rs backend.
+- mln-rs trusts Android's system certificates when the app gives it no Java VM
+  ([louwers/mln-rs#307](https://github.com/louwers/mln-rs/pull/307)).
+- mln-rs links Apple's own SQLite on Apple's platforms, as Exact's own crates do
+  ([louwers/mln-rs#344](https://github.com/louwers/mln-rs/pull/344)). The SQLite it built in probed
+  filesystem types with `statfs`, which Apple counts as a disk-space API whose use an app's privacy
+  manifest must give a reason for, and none of Apple's reasons fits, so Exact's iOS build refused the
+  app.
+- A surface keeps presenting on Vulkan after the map rests
+  ([louwers/mln-rs#343](https://github.com/louwers/mln-rs/pull/343)). After ten seconds without a
+  frame the WebGPU surface asks to be reconfigured, and with its size unchanged it dropped the frame's
+  acquired texture unpresented. Metal takes such a drawable back and Vulkan doesn't, so on Android
+  each rest of the map cost the swapchain an image, until none was left and the map stopped drawing
+  ("dequeueBuffer timed out").
+- The gesture recognizer's camera trait and events are public again, and its options have switches
+  for rotating, pitching and scroll zoom
+  ([louwers/mln-rs#350](https://github.com/louwers/mln-rs/pull/350)). A host on the runtime has the
+  map on the runtime's thread, so its camera reads the map's snapshot and sends the recognizer's
+  deltas as commands, which takes implementing `GestureCamera` outside mln-rs.
 
 ## Where it runs
 

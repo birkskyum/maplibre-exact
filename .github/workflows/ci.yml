@@ -1,6 +1,6 @@
 # Builds, lints and tests the core and each host against mln-rs at the
-# commit the hosts build on, with the patches in patches/mln-rs. Exact's host
-# builds only through Exact's own tooling, so it isn't here.
+# commit the hosts build on. Exact's host builds only through Exact's own
+# tooling, so it isn't here.
 name: CI
 
 on:
@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MLN_RS: 09ec095fa4bd862973cd5c5b4e0f47099937434f
+  MLN_RS: 1102a74c3c03039179feb1d9d182430a8264927f
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -33,8 +33,6 @@ jobs:
           repository: louwers/mln-rs
           ref: ${{ env.MLN_RS }}
           path: mln-rs
-      - name: Apply the mln-rs patches
-        run: git -C mln-rs -c user.name=ci -c user.email=ci@localhost am "$PWD"/maplibre-rust-ui/patches/mln-rs/*.patch
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: maplibre-rust-ui/${{ matrix.crate }}
