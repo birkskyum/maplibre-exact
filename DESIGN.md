@@ -232,7 +232,7 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
   `maplibre`, belongs to the first map.
 - Slint and egui beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an Android
   phone.
-- Bevy, iced and GPUI. Bevy draws with the same wgpu as mln-rs, so its host works as egui's does. iced is on
-  an older wgpu, and GPUI on Metal and Vulkan of its own, so theirs need mln-rs's exported textures.
+- Bevy, iced and GPUI. Bevy draws with the same wgpu as mln-rs, so its host works as egui's does.
+  iced is on an older wgpu, and GPUI on Metal and Vulkan of its own, so theirs need mln-rs's exported
+  textures.
 - MapLibre Native through maplibre-native-ffi, and GL JS on the web, as engines behind `Component`.
-- MapLibre Native as the engine, through maplibre-native-ffi.
