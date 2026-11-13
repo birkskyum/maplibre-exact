@@ -12,3 +12,5 @@
 /egui/target/
 /bevy/target/
 /gpui/target/
+/site/
+/.cache/

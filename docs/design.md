@@ -2,17 +2,17 @@
 
 ## One model, any host
 
-An app declares a map ([`model.rs`](core/src/model.rs)): a base style, its own content over it, a
+An app declares a map ([the map model](model.md)): a base style, its own content over it, a
 camera and options. It sends commands as JSON, hears of the events it listens for, and reads the map's
 record, all with MapLibre GL JS's names. Nothing in that model names a UI framework or an engine. A
 camera moves the map only when its value changes, so the person can pan freely and the app moves the
 map again by changing the value. That is how `@exact/maps` treats its camera props too.
 
-The core's [`Engine`](core/src/engine.rs) draws that map, and each UI framework has a host that gives
+The core's [`Engine`](https://github.com/birkskyum/maplibre-rust-ui/blob/main/core/src/engine.rs) draws that map, and each UI framework has a host that gives
 the engine somewhere to draw and its input, and gives the app the model in the framework's own terms.
 In Exact the map is a canvas surface named `maplibre` with nine named arguments, commands come in
 through `postMessage`, events go out to the canvas's `message=` action, and the app reads the record
-as `exactSurface("maplibre")` ([`protocol.rs`](exact/src/protocol.rs)).
+as `exactSurface("maplibre")` ([`protocol.rs`](https://github.com/birkskyum/maplibre-rust-ui/blob/main/exact/src/protocol.rs)).
 
 The engine draws with mln-rs, through its runtime, whose API mirrors maplibre-native-ffi's C API one
 to one. MapLibre Native can stand in for it through maplibre-native-ffi, which takes the same calls,
@@ -142,12 +142,12 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
    declare a surface, as it declares a view, would make the map a dependency and nothing more.
 2. **Rust 1.97.0 is pinned and enforced.** The build refuses an app whose toolchain differs from the
    checkout's. mln-rs and its `mlt-core` dependency need 1.98, so the prototype moves its Exact
-   checkout to 1.99.1 ([`exact/patches`](exact/patches)).
+   checkout to 1.99.1 ([`exact/patches`](https://github.com/birkskyum/maplibre-rust-ui/tree/main/exact/patches)).
 3. **Exact version pins in vendored crates.** `hermes-lean-sys`, `ibex2` and the Hermes installer
    require `ureq = "=3.4.0"`, because `ibex2` uses ureq's `unversioned` transport API, which changes
    between minor versions. mln-rs needs `^3.5.1`, which Cargo resolves even on Apple platforms, where
    mln-rs never compiles ureq. With the pins relaxed, `ibex2` needs one line for ureq 3.5
-   (`NextTimeout` gained two fields), in [`exact/patches`](exact/patches). The web build's
+   (`NextTimeout` gained two fields), in [`exact/patches`](https://github.com/birkskyum/maplibre-rust-ui/tree/main/exact/patches). The web build's
    wasm-bindgen CLI is 0.2.127 and refuses the 0.2.130 mln-rs pins.
 4. **No modifier keys on pointer and wheel events, and no platform pinch.** Shift-drag to box-zoom,
    Ctrl-drag to rotate and a trackpad's magnify and rotate can't be recognized. Two-finger touch
@@ -170,7 +170,7 @@ Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://git
     each child gets what the last capture of its size left there, or nothing in a new target: the
     compass showed the locate button's arrow, and the callout was blank. It shows on an iPhone 17
     Pro (iOS 27.2) and the iOS 26.5 simulator, and `EXACT_CAPTURE=cpu` cures it. The prototype
-    captures each child on the CPU ([`exact/patches`](exact/patches)), which costs little for
+    captures each child on the CPU ([`exact/patches`](https://github.com/birkskyum/maplibre-rust-ui/tree/main/exact/patches)), which costs little for
     children the size of markers.
 
 ## What mln-rs would need
@@ -213,7 +213,7 @@ Five needs are met.
 1. **BGRA surfaces in its Metal renderer.** GPUI draws an IOSurface where an element is, without a
    copy, through its `surface` primitive, but only in the YCbCr format that video calls send, which
    would smear the colours of a map's labels. The prototype draws BGRA surfaces too, with a second
-   pipeline whose fragment shader samples one texture ([`gpui/patches/zed`](gpui/patches/zed)).
+   pipeline whose fragment shader samples one texture ([`gpui/patches/zed`](https://github.com/birkskyum/maplibre-rust-ui/tree/main/gpui/patches/zed)).
 2. **Surfaces in its DirectX and wgpu renderers.** Its DirectX renderer takes surfaces and draws
    none, and its wgpu renderer, on Linux and the web, takes none. mln-rs shares DXGI textures and
    dmabufs, which those renderers would draw as the Metal one draws IOSurfaces.
@@ -248,8 +248,7 @@ Five needs are met.
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- Slint, egui and Bevy beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an
+- Slint, egui, Bevy and GPUI beyond macOS, Native Shell on Android, Whisker on macOS, and Whisker on an
   Android phone.
-- iced and GPUI. iced is on an older wgpu, and GPUI on Metal and Vulkan of its own, so their hosts
-  need mln-rs's exported textures.
+- iced, which is on an older wgpu, so its host needs mln-rs's exported textures, as GPUI's has.
 - MapLibre Native through maplibre-native-ffi, and GL JS on the web, as engines behind `Component`.

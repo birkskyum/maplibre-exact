@@ -1,0 +1,78 @@
+# Builds the docs site with Zensical and the core's API docs with rustdoc,
+# against mln-rs at the commit CI builds on, and publishes both on GitHub
+# Pages, the API docs under api/.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  MLN_RS: 1102a74c3c03039179feb1d9d182430a8264927f
+  CARGO_TERM_COLOR: always
+
+jobs:
+  api:
+    name: API docs
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: maplibre-rust-ui
+      - uses: actions/checkout@v7
+        with:
+          repository: louwers/mln-rs
+          ref: ${{ env.MLN_RS }}
+          path: mln-rs
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: maplibre-rust-ui/core
+      - name: Document the core
+        working-directory: maplibre-rust-ui/core
+        run: cargo doc --no-deps
+      - uses: actions/upload-artifact@v7
+        with:
+          name: api
+          path: maplibre-rust-ui/core/target/doc
+
+  site:
+    name: Site
+    needs: api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - run: pip install zensical
+      - run: zensical build --clean
+      - uses: actions/download-artifact@v8
+        with:
+          name: api
+          path: site/api
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deployment

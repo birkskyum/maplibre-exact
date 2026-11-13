@@ -1,0 +1,81 @@
+[project]
+site_name = "maplibre-rust-ui"
+site_description = "MapLibre maps for Rust UI frameworks, drawn by mln-rs"
+site_url = "https://birkskyum.github.io/maplibre-rust-ui/"
+repo_url = "https://github.com/birkskyum/maplibre-rust-ui"
+repo_name = "birkskyum/maplibre-rust-ui"
+edit_uri = "edit/main/docs/"
+copyright = "MIT licensed"
+nav = [
+  { "Home" = "index.md" },
+  { "Getting started" = "getting-started.md" },
+  { "The map model" = "model.md" },
+  { "Hosts" = [
+    "hosts/index.md",
+    { "Slint" = "hosts/slint.md" },
+    { "egui" = "hosts/egui.md" },
+    { "Bevy" = "hosts/bevy.md" },
+    { "GPUI" = "hosts/gpui.md" },
+    { "Native Shell" = "hosts/nsh.md" },
+    { "Whisker" = "hosts/whisker.md" },
+    { "Exact" = "hosts/exact.md" },
+  ] },
+  { "Design" = "design.md" },
+  { "API" = "https://birkskyum.github.io/maplibre-rust-ui/api/maplibre_rust_ui/" },
+]
+
+[project.theme]
+language = "en"
+icon.logo = "lucide/map"
+icon.repo = "fontawesome/brands/github"
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "content.tabs.link",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "indigo"
+accent = "blue"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "indigo"
+accent = "blue"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
