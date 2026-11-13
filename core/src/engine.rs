@@ -118,6 +118,8 @@ pub struct Engine {
     /// The camera last reported at rest.
     rest: Camera,
     loaded: bool,
+    /// Whether the load waits for the sources' answer.
+    load_pending: bool,
     animating: bool,
     click: Option<Click>,
     contextmenu: Option<Click>,
@@ -244,6 +246,7 @@ impl Engine {
             sent: Vec::new(),
             sources: None,
             loaded: false,
+            load_pending: false,
             animating: false,
             click: None,
             contextmenu: None,
@@ -555,10 +558,15 @@ impl Engine {
                 events.push(Event::Moveend);
             }
         }
+        // The load waits for the sources' attribution, which its record has.
         if self.snapshot.fully_loaded && !self.loaded {
             self.loaded = true;
-            events.push(Event::Load);
+            self.load_pending = true;
             self.ask_sources();
+        }
+        if self.load_pending && self.sources.is_none() {
+            self.load_pending = false;
+            events.push(Event::Load);
         }
         let waiting = self.map.applied_sequence() < self.map.sent_sequence()
             || self.snapshot.update_generation > self.drawn_update

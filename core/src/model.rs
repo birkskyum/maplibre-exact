@@ -480,7 +480,8 @@ impl Command {
 /// What the map posts to the canvas's `message=` action, as its name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// The style loaded and the map drew it.
+    /// The style loaded and the map drew it, and the record has the
+    /// sources' attribution.
     Load,
     /// The camera came to rest, whoever moved it.
     Moveend,
