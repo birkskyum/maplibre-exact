@@ -345,19 +345,10 @@ impl Engine {
         if let Err(e) = self.map.set_bounds(limits) {
             self.error = Some(format!("maplibre: options: {}", e.message));
         }
-        let mut gestures = GestureOptions::default();
-        if options.drag_rotate == Some(false) {
-            gestures.drag_rotate = 0.0;
-            gestures.rotate_threshold = f64::INFINITY;
-        }
-        if options.pitch_with_rotate == Some(false) || options.touch_pitch == Some(false) {
-            gestures.drag_pitch = 0.0;
-        }
-        if options.scroll_zoom == Some(false) {
-            gestures.notch_zoom = 0.0;
-            gestures.scroll_zoom_rate = 0.0;
-            gestures.pinch_zoom_rate = 0.0;
-        }
+        let gestures = GestureOptions::default()
+            .rotate(options.drag_rotate != Some(false))
+            .pitch(options.pitch_with_rotate != Some(false) && options.touch_pitch != Some(false))
+            .scroll_zoom(options.scroll_zoom != Some(false));
         self.gestures.set_options(gestures);
     }
 
@@ -375,7 +366,7 @@ impl Engine {
         }
         let interactive = self.interactive();
         let point = ScreenCoordinate::new(x, y);
-        let tolerance = self.gestures.options().click_tolerance;
+        let tolerance = self.gestures.options().click_tolerance();
         let index = self.presses.iter().position(|press| press.id == id);
         match (phase, index) {
             (Phase::Down, _) => self.presses.push(Press { id, at: point, since: at_ms, touch, secondary, long: false }),

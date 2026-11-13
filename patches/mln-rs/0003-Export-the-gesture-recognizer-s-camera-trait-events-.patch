@@ -1,14 +1,15 @@
-From 00fe8127df2f490d1f09f193ee1b76ac3f9e8c34 Mon Sep 17 00:00:00 2001
+From 409ae7cf30188fcd30fef7479b32aa5848716f83 Mon Sep 17 00:00:00 2001
 From: Birk Skyum <birk.skyum@pm.me>
 Date: Fri, 13 Nov 2026 18:05:07 +0100
-Subject: [PATCH 3/3] Export the gesture recognizer's camera trait, events and
+Subject: [PATCH] Export the gesture recognizer's camera trait, events and
  options
 
 ---
- crates/mln_gestures/src/lib.rs        |  4 +-
- crates/mln_gestures/src/options.rs    | 56 +++++++++++++--------------
- crates/mln_gestures/src/recognizer.rs | 10 +++++
- 3 files changed, 41 insertions(+), 29 deletions(-)
+ crates/mln_gestures/src/lib.rs             |  4 +-
+ crates/mln_gestures/src/options.rs         | 43 +++++++++++++-
+ crates/mln_gestures/src/recognizer.rs      | 25 ++++++--
+ crates/mln_gestures/src/recognizer_test.rs | 69 ++++++++++++++++++++++
+ 4 files changed, 134 insertions(+), 7 deletions(-)
 
 diff --git a/crates/mln_gestures/src/lib.rs b/crates/mln_gestures/src/lib.rs
 index 514f624c..dc8863ef 100644
@@ -24,116 +25,76 @@ index 514f624c..dc8863ef 100644
 +pub use options::GestureOptions;
  pub use recognizer::GestureRecognizer;
 diff --git a/crates/mln_gestures/src/options.rs b/crates/mln_gestures/src/options.rs
-index 4e5d7f96..469018a4 100644
+index 4e5d7f96..6bcda123 100644
 --- a/crates/mln_gestures/src/options.rs
 +++ b/crates/mln_gestures/src/options.rs
-@@ -10,62 +10,62 @@ use mln_map::{MomentumDecay, MomentumSnap};
+@@ -10,7 +10,7 @@ use mln_map::{MomentumDecay, MomentumSnap};
  ///
  /// Distances are in logical pixels, and times in milliseconds (`_ms`).
  #[derive(Clone, Copy, Debug, PartialEq)]
 -pub(crate) struct GestureOptions {
 +pub struct GestureOptions {
      /// How far a press may move and still be a click; drags start past it.
--    pub(crate) click_tolerance: f64,
-+    pub click_tolerance: f64,
+     pub(crate) click_tolerance: f64,
      /// How far apart two taps of a double tap may be, and the most time
-     /// between them. A two-finger tap's fingers may move this far.
--    pub(crate) tap_tolerance: f64,
--    pub(crate) tap_interval_ms: f64,
-+    pub tap_tolerance: f64,
-+    pub tap_interval_ms: f64,
-     /// Degrees of bearing per pixel of a sideways rotate drag: ffi's demo's
-     /// 0.5 (GL JS, Compose and Orbis turn 0.8).
--    pub(crate) drag_rotate: f64,
-+    pub drag_rotate: f64,
-     /// Degrees of pitch per pixel of an upward rotate drag or two-finger
-     /// drag.
--    pub(crate) drag_pitch: f64,
-+    pub drag_pitch: f64,
-     /// Zoom levels per pixel of a double-tap drag downward.
--    pub(crate) tap_drag_zoom: f64,
-+    pub tap_drag_zoom: f64,
-     /// Zoom levels a pinch spreads or closes before it zooms.
--    pub(crate) pinch_zoom_threshold: f64,
-+    pub pinch_zoom_threshold: f64,
-     /// Pixels along the fingers' circle a twist travels before it rotates.
--    pub(crate) rotate_threshold: f64,
-+    pub rotate_threshold: f64,
-     /// Zoom levels per wheel notch, toward the user zooming in, and how long
-     /// a notch eases: ffi's demo's and Compose's 100 px at 1/300 per px (⅓),
-     /// over GL JS's 200 ms. Provisional: unlike glides, no one has measured
-     /// the native map apps' notches yet (see the README).
--    pub(crate) notch_zoom: f64,
--    pub(crate) notch_duration_ms: f64,
-+    pub notch_zoom: f64,
-+    pub notch_duration_ms: f64,
-     /// Zoom levels per pixel of continuous scroll, toward the user zooming
-     /// in: ffi's demo's and Compose's 1/300. Provisional, as `notch_zoom`.
--    pub(crate) scroll_zoom_rate: f64,
-+    pub scroll_zoom_rate: f64,
-     /// The same with Ctrl held, as a browser's trackpad pinch sends: ffi's
-     /// demo's 1/100.
--    pub(crate) pinch_zoom_rate: f64,
-+    pub pinch_zoom_rate: f64,
-     /// The most a scroll zooms in one step, in levels: GL JS's
-     /// `maxScalePerFrame` of 2. A notch carries the rest to later frames.
--    pub(crate) max_scroll_zoom: f64,
-+    pub max_scroll_zoom: f64,
-     /// A scroll is one gesture until this long after its last event and its
-     /// eases (Compose's and GL JS's 200 ms).
--    pub(crate) scroll_idle_ms: f64,
-+    pub scroll_idle_ms: f64,
-     /// Keyboard steps: pixels of pan, degrees of bearing, degrees of pitch.
--    pub(crate) key_pan: f64,
--    pub(crate) key_bearing: f64,
--    pub(crate) key_pitch: f64,
-+    pub key_pan: f64,
-+    pub key_bearing: f64,
-+    pub key_pitch: f64,
- 
-     /// How each part of a release slows down.
--    pub(crate) pan_decay: MomentumDecay,
--    pub(crate) zoom_decay: MomentumDecay,
--    pub(crate) bearing_decay: MomentumDecay,
--    pub(crate) pitch_decay: MomentumDecay,
-+    pub pan_decay: MomentumDecay,
-+    pub zoom_decay: MomentumDecay,
-+    pub bearing_decay: MomentumDecay,
-+    pub pitch_decay: MomentumDecay,
-     /// Where each part settles after a gesture that changed it, as
-     /// maplibre-native-ffi's `mln_anchored_momentum::snap` and Compose's
-     /// `snapping` set it. The defaults are Compose's: the bearing settles on
-     /// north within 7°, and zoom and pitch stay where the gesture leaves
-     /// them ([`MomentumSnap::ZOOM`] and [`MomentumSnap::PITCH`] are ffi's
-     /// C API defaults, which settle them on a whole level and flat).
--    pub(crate) zoom_snap: Option<MomentumSnap>,
--    pub(crate) bearing_snap: Option<MomentumSnap>,
--    pub(crate) pitch_snap: Option<MomentumSnap>,
-+    pub zoom_snap: Option<MomentumSnap>,
-+    pub bearing_snap: Option<MomentumSnap>,
-+    pub pitch_snap: Option<MomentumSnap>,
- 
-     /// Whether a release that catches the recognizer's last glide (a flick
-     /// that interrupts a glide going its way) adds that glide's speed, as
-@@ -73,13 +73,13 @@ pub(crate) struct GestureOptions {
-     /// decay still caps the speed. No map app measured in
-     /// maplibre-native-ffi#1705 does it (Apple Maps, Google Maps), nor do GL
-     /// JS and ffi's demo.
--    pub(crate) carry_caught_glide: bool,
-+    pub carry_caught_glide: bool,
-     /// Whether a press stops every camera animation, as GL JS and the
-     /// MapLibre Native SDKs do, or only the recognizer's own.
--    pub(crate) interrupt_animations: bool,
-+    pub interrupt_animations: bool,
+@@ -80,6 +80,12 @@ pub(crate) struct GestureOptions {
      /// The [`AnimationOptions::transition_id`](mln_map::AnimationOptions::transition_id)
      /// of the eases and momentum the recognizer starts.
--    pub(crate) transition_id: u64,
-+    pub transition_id: u64,
+     pub(crate) transition_id: u64,
++
++    /// Which gestures move the camera ([`rotate`](Self::rotate),
++    /// [`pitch`](Self::pitch) and [`scroll_zoom`](Self::scroll_zoom)).
++    pub(crate) rotate: bool,
++    pub(crate) pitch: bool,
++    pub(crate) scroll_zoom: bool,
  }
  
  impl GestureOptions {
+@@ -112,7 +118,42 @@ impl GestureOptions {
+         interrupt_animations: true,
+         // "gestures" in ASCII.
+         transition_id: 0x6765_7374_7572_6573,
++        rotate: true,
++        pitch: true,
++        scroll_zoom: true,
+     };
++
++    /// Whether gestures turn the map: a rotate drag, two fingers or a
++    /// platform pinch twisting, and Shift with the left and right keys. On by
++    /// default.
++    #[must_use]
++    pub fn rotate(mut self, on: bool) -> Self {
++        self.rotate = on;
++        self
++    }
++
++    /// Whether gestures pitch the map: a rotate drag up or down, two fingers
++    /// moving up or down together, and Shift with the up and down keys. On by
++    /// default.
++    #[must_use]
++    pub fn pitch(mut self, on: bool) -> Self {
++        self.pitch = on;
++        self
++    }
++
++    /// Whether a wheel or trackpad scroll zooms. Off, the recognizer leaves
++    /// scrolls unhandled. On by default.
++    #[must_use]
++    pub fn scroll_zoom(mut self, on: bool) -> Self {
++        self.scroll_zoom = on;
++        self
++    }
++
++    /// How far a press may move and still be a click, in logical pixels.
++    #[must_use]
++    pub fn click_tolerance(&self) -> f64 {
++        self.click_tolerance
++    }
+ }
+ 
+ impl Default for GestureOptions {
 diff --git a/crates/mln_gestures/src/recognizer.rs b/crates/mln_gestures/src/recognizer.rs
-index 5b48151a..fcc4fd57 100644
+index 5b48151a..fbc8271e 100644
 --- a/crates/mln_gestures/src/recognizer.rs
 +++ b/crates/mln_gestures/src/recognizer.rs
 @@ -474,6 +474,16 @@ impl GestureRecognizer {
@@ -153,6 +114,143 @@ index 5b48151a..fcc4fd57 100644
      /// A gesture is under way: hosts keep pointer capture and scrolling off.
      #[cfg(test)]
      #[must_use]
+@@ -726,7 +736,7 @@ impl GestureRecognizer {
+                     zooming: false,
+                     rotating: false,
+                     // Fingers above one another can't tilt.
+-                    pitch: (vector.y.abs() > vector.x.abs()).then_some(false),
++                    pitch: (!self.options.pitch || vector.y.abs() > vector.x.abs()).then_some(false),
+                     single_since: None,
+                     panning: false,
+                     tap: now - self.pointers[0].down_at < self.options.tap_interval_ms
+@@ -799,8 +809,8 @@ impl GestureRecognizer {
+         let delta = to - from;
+         match self.mode {
+             Mode::Rotate => {
+-                let bearing = delta.x * self.options.drag_rotate;
+-                let pitch = -delta.y * self.options.drag_pitch;
++                let bearing = if self.options.rotate { delta.x * self.options.drag_rotate } else { 0.0 };
++                let pitch = if self.options.pitch { -delta.y * self.options.drag_pitch } else { 0.0 };
+                 let step = CameraDelta { bearing: Some(bearing), pitch: Some(pitch), ..CameraDelta::default() };
+                 self.update(camera, step);
+                 self.tracking.record(now, Step { bearing, pitch, ..Step::default() });
+@@ -860,7 +870,7 @@ impl GestureRecognizer {
+         if !pinch.zooming && (distance / pinch.start_distance).log2().abs() >= self.options.pinch_zoom_threshold {
+             pinch.zooming = true;
+         }
+-        if !pinch.rotating {
++        if !pinch.rotating && self.options.rotate {
+             let threshold = self.options.rotate_threshold / (std::f64::consts::PI * pinch.min_diameter) * 360.0;
+             if angle(pinch.start_vector, vector).abs() >= threshold {
+                 pinch.rotating = true;
+@@ -1056,6 +1066,9 @@ impl GestureRecognizer {
+         now: f64,
+     ) -> bool {
+         let options = self.options;
++        if !options.scroll_zoom {
++            return false;
++        }
+         let mut scroll = self.scroll.unwrap_or(Scroll { anchor: position, idle_until: now, ease: None });
+         scroll.anchor = position;
+         scroll.idle_until = now + options.scroll_idle_ms;
+@@ -1116,6 +1129,8 @@ impl GestureRecognizer {
+         let (pan, bearing, pitch) = (self.options.key_pan, self.options.key_bearing, self.options.key_pitch);
+         let mut step = CameraDelta { animation, ..CameraDelta::default() };
+         match (key, modifiers.shift) {
++            (Key::Left | Key::Right, true) if !self.options.rotate => return false,
++            (Key::Up | Key::Down, true) if !self.options.pitch => return false,
+             (Key::ZoomIn | Key::ZoomOut, shift) => {
+                 let levels: f64 = if shift { 2.0 } else { 1.0 };
+                 step.scale = Some(if key == Key::ZoomIn { levels } else { -levels }.exp2());
+@@ -1169,7 +1184,7 @@ impl GestureRecognizer {
+         }
+         let zoom = if scale > 0.0 && scale.is_finite() { scale.log2() } else { 0.0 };
+         // Fingers turning clockwise turn the map clockwise.
+-        let bearing = if rotation.is_finite() { -rotation } else { 0.0 };
++        let bearing = if rotation.is_finite() && self.options.rotate { -rotation } else { 0.0 };
+         if zoom == 0.0 && bearing == 0.0 {
+             return true;
+         }
+diff --git a/crates/mln_gestures/src/recognizer_test.rs b/crates/mln_gestures/src/recognizer_test.rs
+index cfee5c75..6ac6a250 100644
+--- a/crates/mln_gestures/src/recognizer_test.rs
++++ b/crates/mln_gestures/src/recognizer_test.rs
+@@ -575,6 +575,75 @@ fn keys_step_the_camera() {
+     assert!(distance(moved, p(500.0, 300.0)) < 1e-6, "{moved:?}");
+ }
+ 
++#[test]
++fn rotate_pitch_and_scroll_zoom_turn_their_gestures_off() {
++    let off = GestureOptions::DEFAULT.rotate(false).pitch(false).scroll_zoom(false);
++
++    // A rotate drag neither turns nor pitches.
++    let mut rig = Rig::with(&off);
++    rig.down_with(1, PointerKind::Mouse, 400.0, 300.0, Modifiers { ctrl: true, ..Modifiers::default() });
++    for i in 1..=10 {
++        rig.now += 16.0;
++        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0 - 10.0 * f64::from(i));
++    }
++    rig.up(1, 500.0, 200.0);
++    rig.settle();
++    assert_eq!((rig.bearing(), rig.pitch()), (0.0, 0.0));
++
++    // Two fingers twisting apart zoom without turning.
++    let mut rig = Rig::with(&off);
++    rig.down(1, PointerKind::Touch, 300.0, 300.0);
++    rig.down(2, PointerKind::Touch, 500.0, 300.0);
++    for i in 1..=20 {
++        let t = f64::from(i) / 20.0;
++        let half = 100.0 * (1.0 + t);
++        let (dy, dx) = (t * std::f64::consts::FRAC_PI_2).sin_cos();
++        rig.now += 16.0;
++        rig.to(1, 400.0 - dx * half, 300.0 - dy * half);
++        rig.to(2, 400.0 + dx * half, 300.0 + dy * half);
++        rig.frame();
++    }
++    assert!(rig.zoom() > 12.5, "{}", rig.zoom());
++    assert_eq!(rig.bearing(), 0.0);
++
++    // Two fingers moving up together pan instead of tilting.
++    let mut rig = Rig::with(&off);
++    rig.down(1, PointerKind::Touch, 300.0, 400.0);
++    rig.down(2, PointerKind::Touch, 500.0, 400.0);
++    for i in 1..=10 {
++        rig.now += 16.0;
++        let y = 400.0 - 10.0 * f64::from(i);
++        rig.to(1, 300.0, y);
++        rig.to(2, 500.0, y);
++    }
++    assert_eq!(rig.pitch(), 0.0);
++
++    // A platform pinch zooms without turning.
++    let mut rig = Rig::with(&off);
++    rig.pinch(1.0, 0.0, PinchPhase::Begin);
++    for _ in 0..10 {
++        rig.now += 16.0;
++        rig.pinch(2f64.powf(0.05), -2.0, PinchPhase::Update);
++    }
++    rig.pinch(1.0, 0.0, PinchPhase::End);
++    rig.settle();
++    assert!(rig.zoom() > 12.5, "{}", rig.zoom());
++    assert_eq!(rig.bearing(), 0.0);
++
++    // Shift with the arrow keys and scrolls go unhandled.
++    let mut rig = Rig::with(&off);
++    for key in [Key::Left, Key::Right, Key::Up, Key::Down] {
++        assert!(!rig.input.handle(&mut rig.camera, Input::Key { key, modifiers: SHIFT }, rig.now), "{key:?}");
++    }
++    let at = p(100.0, 100.0);
++    assert!(!rig.input.handle(&mut rig.camera, notches(at, -1.0), rig.now));
++    assert!(!rig.input.handle(&mut rig.camera, pixels(at, -30.0, Modifiers::default()), rig.now));
++    rig.settle();
++    assert_eq!((rig.zoom(), rig.bearing(), rig.pitch()), (12.0, 0.0, 0.0));
++
++    assert_eq!(off.rotate(true).pitch(true).scroll_zoom(true), GestureOptions::DEFAULT);
++}
++
+ #[test]
+ fn input_interrupts_animations() {
+     let mut rig = Rig::new();
 -- 
 2.56.0
 
