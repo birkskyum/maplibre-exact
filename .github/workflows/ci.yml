@@ -34,7 +34,7 @@ jobs:
           ref: ${{ env.MLN_RS }}
           path: mln-rs
       - name: Apply the mln-rs patches
-        run: git -C mln-rs -c user.name=ci -c user.email=ci@localhost am ../maplibre-rust-ui/patches/mln-rs/*.patch
+        run: git -C mln-rs -c user.name=ci -c user.email=ci@localhost am "$PWD"/maplibre-rust-ui/patches/mln-rs/*.patch
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: maplibre-rust-ui/${{ matrix.crate }}

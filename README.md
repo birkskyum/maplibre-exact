@@ -47,6 +47,6 @@ exported again, which hosts on the runtime use. The core builds and tests on its
 
 ```sh
 git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-rust-ui 09ec095f
-git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
+git -C mln-rs am "$PWD"/maplibre-rust-ui/patches/mln-rs/*.patch
 cd maplibre-rust-ui/core && cargo test
 ```

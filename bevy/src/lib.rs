@@ -25,6 +25,7 @@ use std::collections::HashMap;
 
 use bevy::app::{App, Plugin, PostUpdate};
 use bevy::asset::{AssetEvent, AssetId, Assets, Handle, RenderAssetUsages};
+use bevy::camera::visibility::Visibility;
 use bevy::ecs::prelude::*;
 use bevy::image::Image;
 use bevy::input::ButtonInput;
@@ -40,7 +41,7 @@ use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy::sprite_render::SpriteAssetEvents;
 use bevy::ui::widget::{ImageNode, NodeImageMode};
-use bevy::ui::{ComputedNode, UiGlobalTransform, UiSystems};
+use bevy::ui::{ComputedNode, Node, PositionType, UiGlobalTransform, UiSystems, Val};
 use bevy::window::{PrimaryWindow, RequestRedraw, Window};
 pub use maplibre_rust_ui::Phase;
 use maplibre_rust_ui::component::Component as Map;
@@ -63,7 +64,10 @@ impl Plugin for MapLibrePlugin {
             .add_message::<MapCommand>()
             .add_message::<MapEvent>()
             .add_message::<MapPointer>()
-            .add_systems(PostUpdate, (add_maps, run_maps, drop_maps).chain().after(UiSystems::Layout));
+            // Before the layout, which then lays out the markers where the
+            // frame drew their places, and after it the map's size of the
+            // frame before, which a resize changes a frame late.
+            .add_systems(PostUpdate, (add_maps, run_maps, place_markers, drop_maps).chain().before(UiSystems::Layout));
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.init_resource::<RenderedMaps>().add_systems(ExtractSchedule, extract_map_textures).add_systems(
                 Render,
@@ -86,6 +90,16 @@ impl MapLibreMap {
     pub fn new(inputs: Inputs) -> MapLibreMap {
         MapLibreMap { inputs }
     }
+}
+
+/// A UI node, a child of a [`MapLibreMap`]'s node, that the content's marker
+/// of the same `id` holds at its place on the map, as GL JS's `Marker` holds
+/// an element: its anchor at the marker's point, moved by its offset. It is
+/// hidden while its place is off the map or behind the globe. The plugin
+/// positions it, so it has `position_type: Absolute`.
+#[derive(Component, Clone, Debug)]
+pub struct MapMarker {
+    pub id: String,
 }
 
 /// A command for the map on the node `map`, which starts at its next frame.
@@ -297,6 +311,10 @@ fn run_maps(
             }
         }
         let size = node.size() * node.inverse_scale_factor();
+        // A node not laid out yet has no size to make the map at.
+        if size.min_element() < 1.0 {
+            continue;
+        }
         let viewport = Viewport {
             size: Size::new(size.x.round().max(1.0) as u32, size.y.round().max(1.0) as u32),
             scale: 1.0 / node.inverse_scale_factor(),
@@ -313,6 +331,24 @@ fn run_maps(
     }
     if again {
         redraw.write(RequestRedraw);
+    }
+}
+
+/// Moves each marker to where its map's last frame drew its place.
+fn place_markers(
+    maps: NonSend<Maps>,
+    mut markers: Query<(&MapMarker, &ChildOf, &mut Node, &ComputedNode, &mut Visibility)>,
+) {
+    for (marker, parent, mut node, computed, mut visibility) in &mut markers {
+        let Some(state) = maps.maps.get(&parent.parent()) else { continue };
+        let Some(declared) = state.map.markers().iter().find(|declared| declared.id == marker.id) else { continue };
+        let size = computed.size() * computed.inverse_scale_factor();
+        let Some(placement) = state.map.place(declared, [0.0, 0.0, size.x, size.y]) else { continue };
+        let shown = if placement.hidden { Visibility::Hidden } else { Visibility::Inherited };
+        visibility.set_if_neq(shown);
+        node.position_type = PositionType::Absolute;
+        node.left = Val::Px(placement.homography[2]);
+        node.top = Val::Px(placement.homography[5]);
     }
 }
 

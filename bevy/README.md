@@ -10,7 +10,7 @@ the same wgpu, 30. The app declares its map as maplibre-rust-ui models it
 It sends commands such as `flyTo` and `fitBounds` as `MapCommand` messages, and hears of events such
 as `click` as `MapEvent` messages, each with the map's record. The map takes the mouse with its
 modifier keys, a trackpad's scroll, pinch and rotation, and touches over its node, and `MapPointer`
-messages hand it input of the app's own.
+messages hand it input of the app's own. Its markers are UI nodes of the app's.
 
 ## Using it
 
@@ -32,6 +32,18 @@ App::new()
 A system changes what a map shows by changing its `MapLibreMap`'s inputs, and sends it commands with
 `MessageWriter<MapCommand>`.
 
+A UI node with a `MapMarker`, a child of the map's node, stays at the place the content's marker of the
+same id names, as GL JS's `Marker` holds an element, with its anchor and offset:
+
+```rust
+// in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+commands.spawn((MapLibreMap::new(inputs), Node { flex_grow: 1.0, ..default() })).with_child((
+    MapMarker { id: "station".to_owned() },
+    Node { position_type: PositionType::Absolute, ..default() },
+    children![Text::new("Trains")],
+));
+```
+
 ## Running the example
 
 [`examples/hello-map`](examples/hello-map) is a map of a few places in Zürich, which a tap names, with
@@ -49,4 +61,4 @@ The walk shows no window. It draws the app into an image of its own, without win
 
 - Windows, Linux, the web and phones.
 - Maps in 3D scenes, as a material's texture.
-- Markers: UI nodes held at places on the map.
+- Markers that turn with the map's bearing or lie on it as it pitches. They stay upright for now.

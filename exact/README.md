@@ -70,9 +70,9 @@ mln-rs `09ec095f`.
 
 ```sh
 git clone https://github.com/louwers/mln-rs && git -C mln-rs checkout -b maplibre-exact 09ec095f
-git -C mln-rs am ../maplibre-rust-ui/patches/mln-rs/*.patch
+git -C mln-rs am "$PWD"/maplibre-rust-ui/patches/mln-rs/*.patch
 git clone https://github.com/expo/exact && git -C exact checkout -b maplibre-exact 09824dea
-git -C exact am ../maplibre-rust-ui/exact/patches/exact/*.patch
+git -C exact am "$PWD"/maplibre-rust-ui/exact/patches/exact/*.patch
 bun exact/scripts/exact.mjs setup
 ```
 

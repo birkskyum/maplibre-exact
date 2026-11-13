@@ -14,7 +14,9 @@ use bevy::render::gpu_readback::{ReadbackComplete, ReadbackOnce};
 use bevy::text::{FontSource, GenericFontFamily};
 use bevy::window::{ExitCondition, WindowResolution};
 use maplibre_bevy::model::{Camera, Command, Content, Event, Inputs, Options};
-use maplibre_bevy::{Button as MapButton, MapCommand, MapEvent, MapLibreMap, MapLibrePlugin, MapPointer, Phase, Press};
+use maplibre_bevy::{
+    Button as MapButton, MapCommand, MapEvent, MapLibreMap, MapLibrePlugin, MapMarker, MapPointer, Phase, Press,
+};
 use serde_json::json;
 
 const STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
@@ -46,7 +48,8 @@ fn content(globe: bool) -> Content {
                 "text-anchor": "top", "text-offset": [0, 0.9]},
              "paint": {"text-color": "#1d2b4f", "text-halo-color": "#ffffff", "text-halo-width": 1.5}}
         ],
-        "hitPadding": 6
+        "hitPadding": 6,
+        "markers": {"station": {"lngLat": PLACES[2].1, "anchor": "bottom", "offset": [0, -14]}}
     });
     if globe {
         content["projection"] = json!({"type": "globe"});
@@ -171,7 +174,18 @@ fn setup(
                     .observe(press);
                 }
             });
-            root.spawn((MapLibreMap::new(inputs), Node { flex_grow: 1.0, ..default() }));
+            root.spawn((MapLibreMap::new(inputs), Node { flex_grow: 1.0, ..default() })).with_child((
+                // A callout over Zürich HB, which the content's marker holds there.
+                MapMarker { id: "station".to_owned() },
+                Node {
+                    padding: UiRect::axes(px(8), px(4)),
+                    position_type: PositionType::Absolute,
+                    border_radius: BorderRadius::all(px(6)),
+                    ..default()
+                },
+                BackgroundColor(Color::WHITE),
+                children![(Text::new("Trains"), font(13.0), TextColor(Color::srgb(0.11, 0.17, 0.31)))],
+            ));
             root.spawn(bar).with_children(|bar| {
                 bar.spawn((Text::new("Tap a place"), font(15.0), Status, Node { flex_grow: 1.0, ..default() }));
                 bar.spawn((Text::new(""), font(12.0), TextColor(Color::srgb(0.6, 0.6, 0.64)), Attribution));

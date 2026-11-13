@@ -18,7 +18,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use serde_json::Value as Json;
 
-use crate::model::{Camera, Command, Content, Event, Inputs, Options, Record};
+use crate::model::{Camera, Command, Content, Event, Inputs, Marker, Options, Record};
+use crate::placement::{self, Placement, View};
 use crate::texture::MapTexture;
 use crate::{Engine, Phase, Pointer, Viewport};
 
@@ -154,6 +155,35 @@ impl Component {
     #[must_use]
     pub fn record(&self) -> Option<Record> {
         self.engine.as_ref().map(Engine::record)
+    }
+
+    /// The content's markers, which hold the app's views at places on the
+    /// map, as GL JS's `Marker` holds an element.
+    #[must_use]
+    pub fn markers(&self) -> &[Marker] {
+        &self.inputs.content.markers
+    }
+
+    /// Where `marker` puts a view laid out at `frame` (x, y, width and height
+    /// in points from the map's top-left corner), on the map as its last frame
+    /// drew it. A host whose views take a transform applies the homography; one
+    /// that only moves views takes its translation, `homography[2]` and
+    /// `homography[5]`, where the marker's anchor goes on the view's top-left
+    /// corner. None before the map drew a frame, or for a marker that leaves its
+    /// view where the layout put it.
+    #[must_use]
+    pub fn place(&self, marker: &Marker, frame: [f32; 4]) -> Option<Placement> {
+        let drawn = self.engine.as_ref()?.drawn_view()?;
+        let projection = mln_map::MapProjection::from_view(drawn).ok()?;
+        let viewport = self.viewport?;
+        let view = View {
+            projection: &projection,
+            bearing: drawn.camera.bearing,
+            pitch: drawn.camera.pitch,
+            size: [viewport.size.width as f32, viewport.size.height as f32],
+            scale: viewport.scale,
+        };
+        placement::place(&view, marker, frame)
     }
 
     /// Why the map couldn't be made, if it couldn't.
