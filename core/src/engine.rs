@@ -206,7 +206,9 @@ impl Engine {
             event_mask: EventMask::ALL_MAP_EVENTS,
             ..Default::default()
         };
-        let (map, _created) = runtime.create_map(options).map_err(fail)?;
+        let (map, created) = runtime.create_map(options).map_err(fail)?;
+        // The map has a snapshot once its thread made it, which takes moments.
+        created.wait().map_err(fail)?;
         load_style(&map, &inputs).map_err(fail)?;
         let jump = CameraUpdate { camera: camera_options(&everything(&inputs.camera)), ..Default::default() };
         let _jumped = map.update_camera(jump).map_err(fail)?;
