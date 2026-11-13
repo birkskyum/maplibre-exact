@@ -1,0 +1,11 @@
+[package]
+name = "maplibre-exact"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps in Exact apps, drawn by mln-rs on Exact's GPU canvas"
+publish = false
+
+[dependencies]
+exact-gpu = { path = "../../exact/gpu" }
+maplibre-rust-ui = { path = "../core" }

@@ -1,29 +1,22 @@
 # Design
 
-## One contract, any engine
+## One model, any host
 
-An app sees a canvas surface named `maplibre` with nine named arguments, JSON commands in, the names
-of the events it listens for out to `message=`, and a record it reads as `exactSurface("maplibre")`
-([`protocol.rs`](crates/maplibre-exact/src/protocol.rs)). Nothing in it names mln-rs, so an app keeps
-its Contract and data module when the engine under it changes. A camera argument moves the map only
-when its value changes, so the person can pan freely and the app moves the map again by changing the
-value. That is how `@exact/maps` treats its camera props too.
+An app declares a map ([`model.rs`](core/src/model.rs)): a base style, its own content over it, a
+camera and options. It sends commands as JSON, hears of the events it listens for, and reads the map's
+record, all with MapLibre GL JS's names. Nothing in that model names a UI framework or an engine. A
+camera moves the map only when its value changes, so the person can pan freely and the app moves the
+map again by changing the value. That is how `@exact/maps` treats its camera props too.
 
-Two kinds of backend fit behind it.
+The core's [`Engine`](core/src/engine.rs) draws that map, and each UI framework has a host that gives
+the engine somewhere to draw and its input, and gives the app the model in the framework's own terms.
+In Exact the map is a canvas surface named `maplibre` with nine named arguments, commands come in
+through `postMessage`, events go out to the canvas's `message=` action, and the app reads the record
+as `exactSurface("maplibre")` ([`protocol.rs`](exact/src/protocol.rs)).
 
-- **A GPU surface** (`mln`, built). Exact hands a surface a wgpu device, a queue and a target texture
-  each frame, on every host with a GPU canvas. mln-rs renders through wgpu, so one engine and one
-  style spec cover macOS, iOS, Linux, Windows and the web. This is the main backend.
-- **Native views** (not started). MapLibre GL JS on the web and MapLibre Native's iOS and Android
-  SDKs, each as an implementation of an Exact package view that reads and writes the same JSON. The
-  content is the style specification's own JSON, which GL JS's `addSource`, `addLayer` and
-  `setPaintProperty` take as it is. Linux and Windows paint their own pixels in Exact and have no
-  platform view to host, so this kind covers fewer hosts.
-
-The open question for native views is the Contract side. A GPU surface is written
-`canvas surface=maplibre(…)`, while a package view is a tag of its own (`maplibre-map style=…`).
-Keeping the two interchangeable needs either Exact to let a package view be drawn by a GPU surface,
-or the app to pick one spelling per platform.
+The engine draws with mln-rs, through its runtime, whose API mirrors maplibre-native-ffi's C API one
+to one. MapLibre Native can stand in for it through maplibre-native-ffi, which takes the same calls,
+for an app that wants the more mature engine. That isn't built yet.
 
 ## Content, the way MapLibre Compose does it
 
@@ -85,23 +78,36 @@ the map. On Android (and Linux and the web) the host draws the child itself at t
 canvas asks for children one by one only while the content has markers, since capturing each costs
 the host more than its ordinary overlay.
 
-## How the mln backend draws
+## How the engine draws
 
-Exact calls a surface on one thread. The surface keeps an mln-rs `Map`, a `Renderer` and an
-`OffscreenTarget` there, all on Exact's device, and runs that thread's mln-rs `RunLoop` at the start
-of each frame, up to 4 ms. mln-rs renders the latest update into its own `Rgba8Unorm` texture and
-submits that frame itself. The surface then draws the texture into Exact's target with one
-full-screen triangle, recorded into the encoder Exact submits after, so queue order makes the frame
-complete before it is sampled.
+The map lives on mln-rs's runtime, on a thread of the runtime's own. The host's thread sends it
+commands, which run there in order and report later through their completions. The map publishes a
+snapshot of its state after each, which the host's thread reads at any time without waiting: markers,
+clicks and the gestures take the camera from it. Each frame the engine demands a frame of what changed.
 
-The surface asks for another frame while the map loads, animates or follows a gesture, and for none
-once mln-rs reports it idle. The map's animation clock is the host's (`Frame::now_ms`), so `flyTo`
-and the momentum of a release follow an agent's `clock` as everything else in an Exact app does.
-Tiles still load in real time.
+A render session attached to the map draws it into what the host gives it.
 
-Input comes raw from the canvas (`wants_input`) and goes to mln_gestures' `GestureRecognizer`, which
-has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotate, the arrow keys and
-`+`/`-`.
+- **The host's textures.** Exact hands a surface a wgpu device and a target texture each frame, so its
+  host makes a texture of its own on that device and lends it to the session as a ring of one. The
+  session renders on the surface's thread, only while the surface services it, so a frame goes to the
+  device's queue before the surface's draw, which samples the texture into Exact's target with one
+  full-screen triangle. The next frame renders on a later service, after Exact submitted that draw.
+- **A surface.** A native view's Metal layer or Android surface takes the session's frames, which it
+  renders on a thread of its own. Whisker and Native Shell give the map a native view, so their hosts
+  will draw this way.
+
+The map's animation clock is the host's, so `flyTo` and the momentum of a release follow an agent's
+`clock` as everything else in an Exact app does. The runtime has no call for it yet, so the engine sets
+the core map's frame time through `Map::with_core`. Tiles still load in real time. The host asks for
+another frame while the map has updates it hasn't drawn, loads, animates or follows a gesture, and for
+none once everything has drawn.
+
+A click asks the session for the features the content's layers drew there, and for a cluster's
+expansion zoom, and reaches the app once both answered, a frame or two later.
+
+Input goes to mln_gestures' `GestureRecognizer`, which has GL JS's gesture set of drag, wheel, double
+click, two-finger pinch and rotate, the arrow keys and `+`/`-`, and moves the map with the camera
+deltas maplibre-native-ffi's C API takes.
 
 ## Against MapLibre Compose
 
@@ -123,19 +129,20 @@ has GL JS's gesture set of drag, wheel, double click, two-finger pinch and rotat
 
 ## What Exact would need to change
 
-Found while building the prototype on exact2 `85c1b9c5`, which it has since moved to `b5ad88a1`.
+Found while building the prototype on exact2 `85c1b9c5`, which it has since moved to `09824dea`.
+Filed: [#425](https://github.com/expo/exact/issues/425) (10), [#426](https://github.com/expo/exact/issues/426) (2, 3), [#427](https://github.com/expo/exact/issues/427) (1) and [#428](https://github.com/expo/exact/issues/428) (4).
 
 1. **A package can't ship a GPU surface.** Surfaces are registered in the app's own `gpu/` crate, so
    each app writes a three-line registry naming `maplibre_exact::mln::surface`. A package that could
    declare a surface, as it declares a view, would make the map a dependency and nothing more.
 2. **Rust 1.97.0 is pinned and enforced.** The build refuses an app whose toolchain differs from the
    checkout's. mln-rs and its `mlt-core` dependency need 1.98, so the prototype moves its Exact
-   checkout to 1.99.1 ([`patches/exact`](patches/exact)).
+   checkout to 1.99.1 ([`exact/patches`](exact/patches)).
 3. **Exact version pins in vendored crates.** `hermes-lean-sys`, `ibex2` and the Hermes installer
    require `ureq = "=3.4.0"`, because `ibex2` uses ureq's `unversioned` transport API, which changes
    between minor versions. mln-rs needs `^3.5.1`, which Cargo resolves even on Apple platforms, where
    mln-rs never compiles ureq. With the pins relaxed, `ibex2` needs one line for ureq 3.5
-   (`NextTimeout` gained two fields), in [`patches/exact`](patches/exact). The web build's
+   (`NextTimeout` gained two fields), in [`exact/patches`](exact/patches). The web build's
    wasm-bindgen CLI is 0.2.127 and refuses the 0.2.130 mln-rs pins.
 4. **No modifier keys on pointer and wheel events, and no platform pinch.** Shift-drag to box-zoom,
    Ctrl-drag to rotate and a trackpad's magnify and rotate can't be recognized. Two-finger touch
@@ -158,22 +165,20 @@ Found while building the prototype on exact2 `85c1b9c5`, which it has since move
     each child gets what the last capture of its size left there, or nothing in a new target: the
     compass showed the locate button's arrow, and the callout was blank. It shows on an iPhone 17
     Pro (iOS 27.2) and the iOS 26.5 simulator, and `EXACT_CAPTURE=cpu` cures it. The prototype
-    captures each child on the CPU ([`patches/exact`](patches/exact)), which costs little for
+    captures each child on the CPU ([`exact/patches`](exact/patches)), which costs little for
     children the size of markers.
 
 ## What mln-rs would need
 
-1. **The offscreen texture.** `OffscreenTarget` only gave its frame back as pixels on the CPU. The
-   prototype adds `OffscreenTarget::color_texture()` ([`patches/mln-rs`](patches/mln-rs)). Rendering
-   straight into a texture view the host owns would also drop the blit.
-2. **Certificates on Android without the platform verifier's Java part.** rustls-platform-verifier
-   panics on Android until the app hands it its context, and it needs a Java class in the APK, which a
-   host that loads the library from native code, as Exact does, doesn't give it. The prototype reads
-   Android's certificate directories (Conscrypt's, then the system image's) into ureq's roots there
-   ([`patches/mln-rs`](patches/mln-rs)).
-3. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
+1. **A frame time in the runtime.** The engine sets the host's clock through `Map::with_core`, which
+   reaches past the runtime's API.
+2. **A map on the page's thread in the browser.** Exact's GPU module runs on the page thread with the
    page's WebGPU device, while mln-rs's browser build runs its map in a Web Worker on an
    `OffscreenCanvas`.
+
+Two needs are met. A host renders into its own textures with `BorrowedTarget`, on every mln-rs
+backend, and mln-rs trusts Android's system certificates when the app gives it no Java VM
+([louwers/mln-rs#307](https://github.com/louwers/mln-rs/pull/307)).
 
 ## Where it runs
 
@@ -195,5 +200,7 @@ Found while building the prototype on exact2 `85c1b9c5`, which it has since move
   worker model.
 - The rest of the table above.
 - Accessibility of the map itself beyond the canvas's `aria-label`.
-- Several maps on one screen share the thread's `RunLoop`, which mln-rs allows, but the record's
-  name, `maplibre`, belongs to the first map.
+- Several maps on one screen each have a runtime of their own, and in Exact the record's name,
+  `maplibre`, belongs to the first map.
+- The hosts for Whisker, Native Shell and Slint.
+- MapLibre Native as the engine, through maplibre-native-ffi.

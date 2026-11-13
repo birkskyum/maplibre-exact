@@ -1,0 +1,26 @@
+[package]
+name = "maplibre-rust-ui"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps for Rust UI frameworks: the map an app declares, on mln-rs's runtime"
+publish = false
+
+# Its own workspace, so that its tests build it alone.
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+feature = { package = "mln-rs-feature", path = "../../mln-rs/vendor/feature" }
+mln_conversion = { package = "mln-rs-conversion", path = "../../mln-rs/crates/mln_conversion" }
+mln_gestures = { package = "mln-rs-gestures", path = "../../mln-rs/crates/mln_gestures" }
+mln_image = { package = "mln-rs-image", path = "../../mln-rs/crates/mln_image" }
+mln_map = { package = "mln-rs-map", path = "../../mln-rs/crates/mln_map" }
+# Only for its font-face shaper, which the runtime's renderer then has.
+mln_renderer = { package = "mln-rs-renderer", path = "../../mln-rs/crates/mln_renderer", features = ["font-face-shaper"] }
+mln_runtime = { package = "mln-rs-runtime", path = "../../mln-rs/crates/mln_runtime", default-features = false, features = ["webgpu"] }
+mln_style = { package = "mln-rs-style", path = "../../mln-rs/crates/mln_style" }
+mln_util = { package = "mln-rs-util", path = "../../mln-rs/crates/mln_util" }
+mln_webgpu = { package = "mln-rs-webgpu", path = "../../mln-rs/crates/mln_webgpu" }

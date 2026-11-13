@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Fri, 13 Nov 2026 09:07:31 +0100
+Subject: [PATCH 5/5] Let contract-lower take icu_locale 2.4
+
+---
+ contract/lower/Cargo.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contract/lower/Cargo.toml b/contract/lower/Cargo.toml
+index 21ce3fec..8ce28a0c 100644
+--- a/contract/lower/Cargo.toml
++++ b/contract/lower/Cargo.toml
+@@ -30,7 +30,7 @@ exact-color = { path = "../../color" }
+ exact-tamber = { path = "../../tamber" }
+ 
+ # CLDR script direction is baked per table; no locale data ships in a host.
+-icu_locale = "=2.3.0"
++icu_locale = "2.3"
+ # A declared sound's digest in the plan (LLP 1096 D1).
+ sha2 = "0.10"
+ # The targets `app.json` ships, which an icon needs a source for (LLP 1121 D10).
+-- 
+2.56.0
+
