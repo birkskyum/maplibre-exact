@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 maplibre-slint = { path = "../.." }
 serde_json = "1"
-slint = { version = "1.18", features = ["unstable-wgpu-30", "renderer-femtovg-wgpu"] }
+slint = { version = "1.18", features = ["unstable-wgpu-30", "renderer-femtovg-wgpu", "unstable-winit-030"] }
 # Only for HELLO_MAP_SNAPSHOTS, which saves the window as PNG files.
 png = "0.18"
 

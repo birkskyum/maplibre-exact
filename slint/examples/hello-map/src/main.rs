@@ -104,9 +104,13 @@ fn take_events(app: &App, map: &RefCell<SlintMap>) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    slint::BackendSelector::new().require_wgpu_30(maplibre_slint::wgpu_configuration()).select()?;
-    let app = App::new()?;
     let walking = std::env::var_os("HELLO_MAP_SNAPSHOTS");
+    let mut backend = slint::BackendSelector::new().require_wgpu_30(maplibre_slint::wgpu_configuration());
+    if walking.is_some() {
+        backend = backend.with_winit_event_loop_builder(background_event_loop());
+    }
+    backend.select()?;
+    let app = App::new()?;
     let mut declared = inputs(false);
     if walking.is_some() {
         // The walk's own taps are clicks; the person's pointer moves nothing.
@@ -158,73 +162,102 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let _walk = walking.map(|folder| walk(&app, &map, folder.into()));
+    if let Some(folder) = walking {
+        walk(&app, &map, folder.into());
+    }
     app.run()?;
     Ok(())
 }
 
-/// One step of the walk, at a moment of it.
-type Step = Box<dyn Fn(&App, &RefCell<SlintMap>)>;
+/// An event loop whose app shows its window without taking the front of the
+/// screen, for the walk.
+fn background_event_loop() -> slint::winit_030::EventLoopBuilder {
+    use slint::winit_030::{SlintEvent, winit};
+    #[allow(unused_mut)]
+    let mut builder = winit::event_loop::EventLoop::<SlintEvent>::with_user_event();
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        builder.with_activation_policy(ActivationPolicy::Prohibited).with_activate_ignoring_other_apps(false);
+    }
+    builder
+}
 
-/// Saves the window at a few moments of a walk: the map loaded, flown to
-/// Zürich, a tap on Zürich HB, which flying there puts in the middle, and the
-/// places fit in view. Then quits.
-fn walk(app: &App, map: &Rc<RefCell<SlintMap>>, folder: std::path::PathBuf) -> Vec<slint::Timer> {
-    let steps: Vec<(u64, Step)> = vec![
-        (6000, Box::new(|app, _| snapshot(app, "1-loaded"))),
-        (6100, Box::new(|_, map| map.borrow_mut().command(fly_to_zurich()))),
-        (10000, Box::new(|app, _| snapshot(app, "2-zurich"))),
-        (
-            10100,
-            Box::new(|app, map| {
-                let (width, height) = (app.global::<MapLibre>().get_width(), app.global::<MapLibre>().get_height());
-                map.borrow_mut().pointer(0, 0, 0, width / 2.0, height / 2.0, [false; 4]);
-                map.borrow_mut().pointer(1, 0, 0, width / 2.0, height / 2.0, [false; 4]);
-            }),
-        ),
-        (11500, Box::new(|app, _| snapshot(app, "3-tapped"))),
-        (11600, Box::new(|_, map| map.borrow_mut().command(fit_places()))),
-        (14000, Box::new(|app, _| snapshot(app, "4-places"))),
-        (
-            14100,
-            Box::new(|_, _| {
-                let _ = slint::quit_event_loop();
-            }),
-        ),
-    ];
+/// One step of the walk, at a moment of it.
+type Step = fn(&App, &RefCell<SlintMap>);
+
+/// The walk's steps, by the milliseconds into it they come at: the map
+/// loaded, flown to Zürich, a tap on Zürich HB, which flying there puts in
+/// the middle, and the places fit in view, each saved. Then the app quits.
+const STEPS: [(u64, Step); 9] = [
+    (50, |app, _| move_to_second_display(app)),
+    (6000, |app, _| snapshot(app, "1-loaded")),
+    (6100, |_, map| map.borrow_mut().command(fly_to_zurich())),
+    (10000, |app, _| snapshot(app, "2-zurich")),
+    (10100, |app, map| {
+        let (width, height) = (app.global::<MapLibre>().get_width(), app.global::<MapLibre>().get_height());
+        map.borrow_mut().pointer(0, 0, 0, width / 2.0, height / 2.0, [false; 4]);
+        map.borrow_mut().pointer(1, 0, 0, width / 2.0, height / 2.0, [false; 4]);
+    }),
+    (11500, |app, _| snapshot(app, "3-tapped")),
+    (11600, |_, map| map.borrow_mut().command(fit_places())),
+    (14000, |app, _| snapshot(app, "4-places")),
+    // The event loop's teardown runs what is left of the walk, so it ends here.
+    (14100, |_, _| std::process::exit(0)),
+];
+
+/// Takes the walk, saving the window into `folder`. Its clock is a thread of
+/// its own, which hands each tenth of a second to the event loop: the event
+/// loop of an app in the background puts off its own timers, and a window
+/// that other windows cover gets no frames from the system. Each tick renders
+/// the window, which a snapshot does, takes the map's events, and runs the
+/// steps that came due.
+fn walk(app: &App, map: &Rc<RefCell<SlintMap>>, folder: std::path::PathBuf) {
     std::fs::create_dir_all(&folder).expect("the snapshot folder can be made");
-    // A window that other windows cover gets no frames from the system, so
-    // the walk renders its own: a snapshot renders the window.
-    let frames = slint::Timer::default();
-    frames.start(slint::TimerMode::Repeated, Duration::from_millis(100), {
-        let weak = app.as_weak();
-        move || {
-            if let Some(app) = weak.upgrade() {
+    FOLDER.with(|current| *current.borrow_mut() = Some(folder));
+    WALKED.with(|walked| *walked.borrow_mut() = Some(map.clone()));
+    let app = app.as_weak();
+    std::thread::spawn(move || {
+        let start = std::time::Instant::now();
+        let mut next = 0;
+        loop {
+            std::thread::sleep(Duration::from_millis(100));
+            let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let due = STEPS.iter().skip(next).take_while(|(at, _)| *at <= elapsed).count();
+            let steps = &STEPS[next..next + due];
+            next += due;
+            let posted = app.upgrade_in_event_loop(move |app| {
+                let Some(map) = WALKED.with(|walked| walked.borrow().clone()) else { return };
                 let _ = app.window().take_snapshot();
+                take_events(&app, &map);
+                for (_, step) in steps {
+                    step(&app, &map);
+                }
+                app.window().request_redraw();
+            });
+            if posted.is_err() {
+                return;
             }
         }
     });
-    let snapshot_folder = Rc::new(folder);
-    steps
-        .into_iter()
-        .map(|(at, step)| {
-            let timer = slint::Timer::default();
-            let (map, weak, folder) = (map.clone(), app.as_weak(), snapshot_folder.clone());
-            timer.start(slint::TimerMode::SingleShot, Duration::from_millis(at), move || {
-                if let Some(app) = weak.upgrade() {
-                    FOLDER.with(|current| *current.borrow_mut() = Some((*folder).clone()));
-                    step(&app, &map);
-                    app.window().request_redraw();
-                }
-            });
-            timer
-        })
-        .chain(std::iter::once(frames))
-        .collect()
+}
+
+/// Moves the window to a display besides the main one, where there is one,
+/// so that the windows in use there don't cover it.
+fn move_to_second_display(app: &App) {
+    use slint::winit_030::WinitWindowAccessor;
+    app.window().with_winit_window(|window| {
+        let primary = window.primary_monitor();
+        if let Some(second) = window.available_monitors().find(|monitor| Some(monitor) != primary.as_ref()) {
+            window.set_outer_position(second.position());
+        }
+    });
 }
 
 thread_local! {
     static FOLDER: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
+    /// The map the walk drives.
+    static WALKED: RefCell<Option<Rc<RefCell<SlintMap>>>> = const { RefCell::new(None) };
 }
 
 fn snapshot(app: &App, name: &str) {

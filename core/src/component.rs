@@ -1,19 +1,25 @@
-//! A map as a component of a UI whose views are the platform's own, as in
-//! Native Shell and Whisker: the map its props declare, in JSON, the engine
-//! once the view has a size, and the input and frames the view hands it. The
-//! host gives each frame a target of the view, such as its Metal layer, and
-//! posts the app the events each frame returns.
+//! A map as a component of a UI: the map the app declares, the engine once
+//! the map has a size, and the input and frames the host hands it. Every host
+//! but Exact's drives its maps through one. Hosts whose views are the
+//! platform's own, as in Native Shell and Whisker, take the declaration as
+//! JSON props and give each frame a target of the view, such as its Metal
+//! layer. Hosts that draw with wgpu, as Slint and egui do, take it as
+//! [`Inputs`] and give each frame their device, and the map draws into a
+//! texture of its own on it. Either way the host posts the app the events each
+//! frame returns.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use mln_gestures::{Button, Input, Modifiers, PointerKind};
-use mln_runtime::{Driver, RenderTarget};
+use mln_runtime::{Device, Driver, RenderTarget};
 use mln_util::geo::ScreenCoordinate;
 use mln_util::image::PremultipliedImage;
+use mln_util::size::Size;
 use serde_json::Value as Json;
 
 use crate::model::{Camera, Command, Content, Event, Inputs, Options, Record};
+use crate::texture::MapTexture;
 use crate::{Engine, Phase, Pointer, Viewport};
 
 /// The events a map posts when its props name none.
@@ -22,10 +28,21 @@ const ALL_EVENTS: [Event; 5] = [Event::Load, Event::Moveend, Event::Click, Event
 /// Where the camera is before the props set one: the whole world.
 const WORLD: Camera = Camera { center: [0.0, 0.0], zoom: 0.0, bearing: 0.0, pitch: 0.0 };
 
-/// What a map posts to its app: an event's name, with the map's record.
+/// What a map posts to its app: an event, by its name too, with the map's
+/// record as JSON.
 pub struct Post {
+    pub event: Event,
     pub name: &'static str,
     pub data: Json,
+}
+
+/// What a frame did on the host's device: whether the map wants another
+/// frame, what to post to the app, and the texture the map draws into when
+/// it is a new one, which the host shows from then on.
+pub struct TextureFrame {
+    pub again: bool,
+    pub posts: Vec<Post>,
+    pub texture: Option<wgpu::Texture>,
 }
 
 /// A pointer as the view reports it, in logical pixels from its top-left
@@ -56,6 +73,8 @@ pub struct Component {
     failures: Vec<String>,
     /// Why the map couldn't be made, once it couldn't.
     refused: Option<String>,
+    /// The texture the map draws into, for a host that draws with wgpu.
+    texture: Option<MapTexture>,
     epoch: Instant,
 }
 
@@ -70,22 +89,84 @@ impl Component {
     /// props a style.
     #[must_use]
     pub fn new() -> Component {
+        Component::with_inputs(Inputs {
+            style: String::new(),
+            camera: WORLD,
+            content: Content::default(),
+            options: Options::default(),
+            events: ALL_EVENTS.to_vec(),
+        })
+    }
+
+    /// A map as `inputs` declares it, made once it has a size.
+    #[must_use]
+    pub fn with_inputs(inputs: Inputs) -> Component {
         Component {
-            inputs: Inputs {
-                style: String::new(),
-                camera: WORLD,
-                content: Content::default(),
-                options: Options::default(),
-                events: ALL_EVENTS.to_vec(),
-            },
+            inputs,
             engine: None,
             pending: Vec::new(),
             images: HashMap::new(),
             viewport: None,
             failures: Vec::new(),
             refused: None,
+            texture: None,
             epoch: Instant::now(),
         }
+    }
+
+    /// The map the app declares now, which the next frame takes: a camera
+    /// moves the map only when its value changes.
+    pub fn set_inputs(&mut self, inputs: Inputs) {
+        self.inputs = inputs;
+    }
+
+    #[must_use]
+    pub fn inputs(&self) -> &Inputs {
+        &self.inputs
+    }
+
+    /// Sends the map `command`, which starts at its next frame.
+    pub fn send(&mut self, command: Command) {
+        let at_ms = self.now_ms();
+        match self.engine.as_mut() {
+            Some(engine) => engine.command(command, at_ms),
+            None => self.pending.push(command),
+        }
+    }
+
+    /// Gives the map the image the content names `src`, as an encoded file.
+    ///
+    /// # Errors
+    ///
+    /// Why the image didn't decode.
+    pub fn add_image(&mut self, src: &str, bytes: &[u8]) -> Result<(), String> {
+        let image = mln_image::decode_image(bytes).map_err(|e| format!("maplibre: image {src}: {}", e.message))?;
+        self.images.insert(src.to_owned(), image);
+        if let Some(engine) = self.engine.as_mut() {
+            engine.images_changed();
+        }
+        Ok(())
+    }
+
+    /// The map's record: its camera at rest, whether everything in view has
+    /// loaded, the last click and context menu, the last failure and the
+    /// style's attribution. None before the map is made.
+    #[must_use]
+    pub fn record(&self) -> Option<Record> {
+        self.engine.as_ref().map(Engine::record)
+    }
+
+    /// Why the map couldn't be made, if it couldn't.
+    #[must_use]
+    pub fn refused(&self) -> Option<&str> {
+        self.refused.as_deref()
+    }
+
+    /// Lets go of the map and its texture, as when the host's renderer goes
+    /// away. The next frame makes them again.
+    pub fn release(&mut self) {
+        self.engine = None;
+        self.texture = None;
     }
 
     /// Prop `name` changed to `value`, or went with `None`: `style`, a URL or
@@ -128,13 +209,7 @@ impl Component {
         };
         json["command"] = Json::from(name);
         match Command::parse(&json.to_string()) {
-            Ok(command) => {
-                let at_ms = self.now_ms();
-                match self.engine.as_mut() {
-                    Some(engine) => engine.command(command, at_ms),
-                    None => self.pending.push(command),
-                }
-            }
+            Ok(command) => self.send(command),
             Err(message) => self.failures.push(message),
         }
     }
@@ -243,7 +318,7 @@ impl Component {
         let mut posts = Vec::new();
         let mut post = |event: Event, record: &Record| {
             if self.inputs.events.contains(&event) {
-                posts.push(Post { name: event.name(), data: serde_json::to_value(record).unwrap_or_default() });
+                posts.push(Post { event, name: event.name(), data: serde_json::to_value(record).unwrap_or_default() });
             }
         };
         for event in events {
@@ -257,6 +332,49 @@ impl Component {
             post(Event::Error, &record);
         }
         (again, posts)
+    }
+
+    /// Runs a frame on a host's wgpu `device` for a map of `viewport`: the
+    /// map draws into a texture of its own there, which a new frame's
+    /// [`TextureFrame::texture`] hands the host to show, and which follows the
+    /// viewport's size. The session renders here, on the host's thread, before
+    /// the host's own draw goes to `queue`.
+    pub fn frame_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, viewport: Viewport) -> TextureFrame {
+        let pixels = Size::new(
+            ((viewport.size.width as f32 * viewport.scale).round() as u32).max(1),
+            ((viewport.size.height as f32 * viewport.scale).round() as u32).max(1),
+        );
+        self.viewport = Some(viewport);
+        let mut shown = None;
+        if let (Some(engine), Some(texture)) = (self.engine.as_mut(), self.texture.as_ref())
+            && (viewport != engine.viewport() || pixels != texture.pixels())
+        {
+            let resized = MapTexture::new(device, pixels);
+            match engine.set_ring(viewport, resized.ring()) {
+                Ok(()) => {
+                    shown = Some(resized.texture.clone());
+                    self.texture = Some(resized);
+                }
+                Err(message) => self.failures.push(message),
+            }
+        }
+        let making = self.engine.is_none() && self.refused.is_none() && !self.inputs.style.is_empty();
+        let made = making.then(|| MapTexture::new(device, pixels));
+        let (again, posts) = self.frame(|viewport| {
+            let texture = made.as_ref().ok_or("maplibre: no texture to draw into")?;
+            let shared = Device::WebGpu(mln_webgpu::Device::from_wgpu(None, device.clone(), queue.clone(), None));
+            Ok((
+                RenderTarget::Borrowed { size: viewport.size, ring: texture.ring(), device: shared },
+                Driver::CallerThread,
+            ))
+        });
+        if let Some(made) = made
+            && self.engine.is_some()
+        {
+            shown = Some(made.texture.clone());
+            self.texture = Some(made);
+        }
+        TextureFrame { again, posts, texture: shown }
     }
 
     fn now_ms(&self) -> f64 {
@@ -312,7 +430,8 @@ pub unsafe fn android_window_target(
 ) -> Result<(RenderTarget, Driver), String> {
     // SAFETY: the caller hands a live window, which the target holds.
     let window = unsafe { android::Window::acquire(window) };
-    let target = RenderTarget::Surface { size: viewport.size, surface: mln_runtime::Surface::window(window), device: None };
+    let target =
+        RenderTarget::Surface { size: viewport.size, surface: mln_runtime::Surface::window(window), device: None };
     Ok((target, Driver::CoreWorker))
 }
 
