@@ -2,3 +2,6 @@
 /exact/target/
 /slint/target/
 /nsh/target/
+/whisker/target/
+/whisker/examples/hello-map/target/
+/whisker/examples/hello-map/gen/

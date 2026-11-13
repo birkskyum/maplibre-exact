@@ -95,8 +95,9 @@ A render session attached to the map draws it into what the host gives it.
 - **A surface.** A native view's Metal layer or Android surface takes the session's frames, which it
   renders on a thread of its own. Native Shell gives the map a native view of its own, and on macOS its
   host makes that view's layer a `CAMetalLayer` and hands the session a wgpu surface of it, made on the
-  main thread. Whisker's views are Swift and Kotlin, so its host will hand Rust the layer or surface
-  from there. Both drive the map through the core's `Component`, which takes props, commands and
+  main thread. Whisker's views are Swift and Kotlin, so its host's Swift view makes its layer a
+  `CAMetalLayer` and hands it to the crate's C functions, with its props, size and input. Both drive
+  the map through the core's `Component`, which takes props, commands and
   input and returns the events to post. A covered macOS window gets no drawables, so the map draws
   nothing there, and a click finds its features in the last frame drawn.
 
@@ -196,8 +197,8 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 
 ## Where it runs
 
-- Slint and Native Shell on macOS: the style, the content's places, `flyTo`, a tap naming a place
-  and `fitBounds`, each in a scripted walk that saves the window.
+- Slint and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
+  content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk.
 
 - Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the
@@ -219,5 +220,5 @@ backend, and mln-rs trusts Android's system certificates when the app gives it n
 - Accessibility of the map itself beyond the canvas's `aria-label`.
 - Several maps on one screen each have a runtime of their own, and in Exact the record's name,
   `maplibre`, belongs to the first map.
-- The host for Whisker, and the Native Shell and Slint hosts beyond macOS.
+- The Slint and Native Shell hosts beyond macOS, and the Whisker host beyond iOS.
 - MapLibre Native as the engine, through maplibre-native-ffi.

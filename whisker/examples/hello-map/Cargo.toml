@@ -1,0 +1,27 @@
+[package]
+name = "hello-map-whisker"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "A Whisker app with a MapLibre map"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+# Tells `whisker run` how to generate, build and launch the app.
+[[bin]]
+name = "whisker-config"
+path = "whisker.rs"
+required-features = ["whisker-config"]
+test = false
+bench = false
+
+[features]
+whisker-config = ["whisker-cng/generate"]
+
+[dependencies]
+maplibre-whisker = { path = "../.." }
+serde_json = "1"
+whisker = "0.18.1"
+whisker-cng = { version = "0.18.1", default-features = false }

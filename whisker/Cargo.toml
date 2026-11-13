@@ -1,0 +1,26 @@
+[package]
+name = "maplibre-whisker"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps in Whisker apps, drawn by mln-rs into a native view"
+publish = false
+include = ["Cargo.toml", "src/**/*.rs", "apple/Package.swift", "apple/**/*.swift"]
+
+[workspace]
+members = ["examples/hello-map"]
+
+[lib]
+crate-type = ["rlib"]
+
+# The Swift package of the map's view, which Whisker's build adds to the
+# app's iOS and macOS projects.
+[package.metadata.whisker.module.platforms]
+ios = { manifest = "apple/Package.swift" }
+macos = { manifest = "apple/Package.swift" }
+
+[dependencies]
+maplibre-rust-ui = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+whisker = "0.18.1"
