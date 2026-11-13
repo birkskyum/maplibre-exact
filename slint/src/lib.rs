@@ -20,6 +20,7 @@
 //! it loads, animates or follows a gesture. Its animations run on a clock that
 //! starts with the map.
 
+pub use maplibre_rust_ui::component::MarkerPlace;
 use maplibre_rust_ui::component::{Component, Press};
 use maplibre_rust_ui::gestures::{Button, Input, Modifiers, WheelDelta};
 pub use maplibre_rust_ui::model;
@@ -43,6 +44,7 @@ pub struct SlintMap {
     component: Component,
     events: Vec<Event>,
     record: Option<Record>,
+    places: Vec<MarkerPlace>,
 }
 
 /// What a frame did: the image to show, when the map has a new texture, and
@@ -50,13 +52,15 @@ pub struct SlintMap {
 pub struct Rendered {
     pub image: Option<slint::Image>,
     pub again: bool,
+    /// The places of the content's markers, when one moved.
+    pub places: Option<Vec<MarkerPlace>>,
 }
 
 impl SlintMap {
     /// A map as `inputs` declares it, made at the window's first frame.
     #[must_use]
     pub fn new(inputs: Inputs) -> SlintMap {
-        SlintMap { component: Component::with_inputs(inputs), events: Vec::new(), record: None }
+        SlintMap { component: Component::with_inputs(inputs), events: Vec::new(), record: None, places: Vec::new() }
     }
 
     /// The map the app declares now. The map takes what changed at its next
@@ -150,7 +154,16 @@ impl SlintMap {
         let frame = self.component.frame_texture(device, queue, Viewport { size: logical, scale });
         self.events.extend(frame.posts.iter().map(|post| post.event));
         self.record = self.component.record();
-        Rendered { image: frame.texture.and_then(|texture| slint::Image::try_from(texture).ok()), again: frame.again }
+        let places = self.component.marker_places();
+        let places = (places != self.places).then(|| {
+            self.places.clone_from(&places);
+            places
+        });
+        Rendered {
+            image: frame.texture.and_then(|texture| slint::Image::try_from(texture).ok()),
+            again: frame.again,
+            places,
+        }
     }
 
     /// Lets go of the map, as when the window's renderer goes away.
@@ -164,9 +177,11 @@ fn modifiers([shift, control, alt, meta]: [bool; 4]) -> Modifiers {
 }
 
 /// Connects a [`SlintMap`] in an `Rc<RefCell<…>>` to the app's component,
-/// whose `MapLibre` global (exported from `@maplibre/maplibre.slint`) must
-/// be in scope: the map renders before each of the window's frames and shows
-/// them through `MapLibre.frame`, and takes the input `MapLibreMap` reports.
+/// whose `MapLibre` global and `MapLibreMarkerPlace` struct (exported from
+/// `@maplibre/maplibre.slint`) must be in scope: the map renders before each
+/// of the window's frames and shows them through `MapLibre.frame`, sets
+/// `MapLibre.places` when a marker moved, and takes the input `MapLibreMap`
+/// reports.
 /// Evaluates to the result of setting the window's rendering notifier.
 #[macro_export]
 macro_rules! connect {
@@ -207,6 +222,21 @@ macro_rules! connect {
                     let rendered = map.borrow_mut().render(device, queue, size, scale);
                     if let Some(image) = rendered.image {
                         global.set_frame(image);
+                    }
+                    if let Some(places) = rendered.places {
+                        let places: ::std::vec::Vec<MapLibreMarkerPlace> = places
+                            .into_iter()
+                            .map(|place| MapLibreMarkerPlace {
+                                name: place.name.into(),
+                                x: place.x,
+                                y: place.y,
+                                hidden: place.hidden,
+                                anchor_x: place.anchor[0],
+                                anchor_y: place.anchor[1],
+                                rotation: place.rotate,
+                            })
+                            .collect();
+                        global.set_places(::slint::ModelRc::new(::slint::VecModel::from(places)));
                     }
                     again.set(rendered.again);
                 }

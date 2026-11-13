@@ -1,8 +1,10 @@
 //! Hello Map in Slint: a map of a few places in Zürich, which a tap names,
-//! with buttons that fly there, fit them in view and turn the globe on.
+//! with buttons that fly there, fit them in view and turn the globe on, and a
+//! callout over the station.
 //!
 //! With `HELLO_MAP_SNAPSHOTS=<folder>` the app takes a short walk on its own,
-//! saving the window as PNG files there, and quits.
+//! saving the window as PNG files there, and quits. Its window is out of
+//! sight, past the edges of the screens, since snapshots render on their own.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -44,7 +46,8 @@ fn content(globe: bool) -> Content {
                 "text-anchor": "top", "text-offset": [0, 0.9]},
              "paint": {"text-color": "#1d2b4f", "text-halo-color": "#ffffff", "text-halo-width": 1.5}}
         ],
-        "hitPadding": 6
+        "hitPadding": 6,
+        "markers": {"station": {"lngLat": PLACES[2].1, "anchor": "bottom", "offset": [0, -14]}}
     });
     if globe {
         content["projection"] = json!({"type": "globe"});
@@ -107,7 +110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let walking = std::env::var_os("HELLO_MAP_SNAPSHOTS");
     let mut backend = slint::BackendSelector::new().require_wgpu_30(maplibre_slint::wgpu_configuration());
     if walking.is_some() {
-        backend = backend.with_winit_event_loop_builder(background_event_loop());
+        backend = backend
+            .with_winit_event_loop_builder(background_event_loop())
+            .with_winit_window_attributes_hook(out_of_sight);
     }
     backend.select()?;
     let app = App::new()?;
@@ -163,6 +168,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     if let Some(folder) = walking {
+        app.set_out_of_sight(true);
         walk(&app, &map, folder.into());
     }
     app.run()?;
@@ -183,6 +189,15 @@ fn background_event_loop() -> slint::winit_030::EventLoopBuilder {
     builder
 }
 
+/// A window without a frame, which the system doesn't keep on a screen, far
+/// past their edges. The app's `out-of-sight` keeps the frame off.
+fn out_of_sight(
+    attributes: slint::winit_030::winit::window::WindowAttributes,
+) -> slint::winit_030::winit::window::WindowAttributes {
+    use slint::winit_030::winit::dpi::LogicalPosition;
+    attributes.with_decorations(false).with_position(LogicalPosition::new(-30_000.0, -30_000.0))
+}
+
 /// One step of the walk, at a moment of it.
 type Step = fn(&App, &RefCell<SlintMap>);
 
@@ -190,7 +205,7 @@ type Step = fn(&App, &RefCell<SlintMap>);
 /// loaded, flown to Zürich, a tap on Zürich HB, which flying there puts in
 /// the middle, and the places fit in view, each saved. Then the app quits.
 const STEPS: [(u64, Step); 9] = [
-    (50, |app, _| move_to_second_display(app)),
+    (0, |app, _| quit_in_sight(app)),
     (6000, |app, _| snapshot(app, "1-loaded")),
     (6100, |_, map| map.borrow_mut().command(fly_to_zurich())),
     (10000, |app, _| snapshot(app, "2-zurich")),
@@ -208,10 +223,10 @@ const STEPS: [(u64, Step); 9] = [
 
 /// Takes the walk, saving the window into `folder`. Its clock is a thread of
 /// its own, which hands each tenth of a second to the event loop: the event
-/// loop of an app in the background puts off its own timers, and a window
-/// that other windows cover gets no frames from the system. Each tick renders
-/// the window, which a snapshot does, takes the map's events, and runs the
-/// steps that came due.
+/// loop of an app in the background puts off its own timers, and a window out
+/// of sight gets no frames from the system. Each tick renders the window,
+/// which a snapshot does, takes the map's events, and runs the steps that came
+/// due.
 fn walk(app: &App, map: &Rc<RefCell<SlintMap>>, folder: std::path::PathBuf) {
     std::fs::create_dir_all(&folder).expect("the snapshot folder can be made");
     FOLDER.with(|current| *current.borrow_mut() = Some(folder));
@@ -242,16 +257,23 @@ fn walk(app: &App, map: &Rc<RefCell<SlintMap>>, folder: std::path::PathBuf) {
     });
 }
 
-/// Moves the window to a display besides the main one, where there is one,
-/// so that the windows in use there don't cover it.
-fn move_to_second_display(app: &App) {
+/// Quits if the system moved the window onto a screen after all.
+fn quit_in_sight(app: &App) {
     use slint::winit_030::WinitWindowAccessor;
-    app.window().with_winit_window(|window| {
-        let primary = window.primary_monitor();
-        if let Some(second) = window.available_monitors().find(|monitor| Some(monitor) != primary.as_ref()) {
-            window.set_outer_position(second.position());
-        }
+    let in_sight = app.window().with_winit_window(|window| {
+        let Ok(at) = window.outer_position() else { return false };
+        window.available_monitors().any(|monitor| {
+            let (origin, size) = (monitor.position(), monitor.size());
+            at.x + 100 > origin.x
+                && at.y + 100 > origin.y
+                && at.x < origin.x + size.width as i32
+                && at.y < origin.y + size.height as i32
+        })
     });
+    if in_sight == Some(true) {
+        eprintln!("walk: the window is on a screen, so the walk stops");
+        std::process::exit(1);
+    }
 }
 
 thread_local! {

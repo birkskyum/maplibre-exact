@@ -120,27 +120,19 @@ impl Shared {
     }
 }
 
-/// Where the content's markers at places go, by their names, on the map as
-/// its last frame drew it: the point each marker's anchor goes to, its anchor
-/// as fractions of the view, the degrees it turns clockwise and how much it
-/// squashes as it lies on the map. None while the content has no markers.
+/// The places of the content's markers at places, by their names, as the
+/// `markers` event carries them. None while the content has no markers.
 fn places(state: &Component) -> Option<JsonValue> {
-    let markers = state.markers();
-    if markers.is_empty() {
+    if state.markers().is_empty() {
         return None;
     }
-    let mut places = serde_json::Map::new();
-    for marker in markers.iter().filter(|marker| marker.lng_lat.is_some()) {
-        let [ax, ay] = marker.anchor.fraction();
-        // A view of no size: the translation is where the anchor goes.
-        let place = match state.place(marker, [0.0; 4]) {
-            Some(placement) if !placement.hidden => {
-                let [a, b, x, c, d, y, ..] = placement.homography;
-                json!({"x": x, "y": y, "anchor": [ax, ay], "rotate": (-b).atan2(a).to_degrees(), "squash": a * d - b * c})
-            }
-            _ => json!({"hidden": true, "anchor": [ax, ay]}),
+    let places = state.marker_places().into_iter().map(|place| {
+        let value = if place.hidden {
+            json!({"hidden": true, "anchor": place.anchor})
+        } else {
+            json!({"x": place.x, "y": place.y, "anchor": place.anchor, "rotate": place.rotate, "squash": place.squash})
         };
-        places.insert(marker.id.clone(), place);
-    }
-    Some(JsonValue::Object(places))
+        (place.name, value)
+    });
+    Some(JsonValue::Object(places.collect()))
 }

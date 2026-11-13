@@ -1,7 +1,7 @@
-import { MapLibre, MapLibreMap } from "@maplibre/maplibre.slint";
+import { MapLibre, MapLibreMap, MapLibreMarker, MapLibreMarkerPlace } from "@maplibre/maplibre.slint";
 import { Button } from "std-widgets.slint";
 
-export { MapLibre }
+export { MapLibre, MapLibreMarkerPlace }
 
 export component App inherits Window {
     title: "Hello Map";
@@ -11,6 +11,9 @@ export component App inherits Window {
     in property <string> status: "Tap a place";
     in property <string> attribution;
     in property <bool> globe;
+    // The walk's window has no frame, which the system would keep on a screen.
+    in property <bool> out-of-sight;
+    no-frame: root.out-of-sight;
     callback zurich();
     callback places();
     callback toggle-globe();
@@ -43,6 +46,24 @@ export component App inherits Window {
 
         MapLibreMap {
             vertical-stretch: 1;
+            for place in MapLibre.places: MapLibreMarker {
+                place: place;
+                if place.name == "station": Rectangle {
+                    background: white;
+                    border-radius: 6px;
+                    callout := HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        Text {
+                            text: "Trains";
+                            font-size: 13px;
+                            color: #1d2b4f;
+                        }
+                    }
+                }
+            }
             Rectangle {
                 x: parent.width - self.width;
                 y: parent.height - self.height;

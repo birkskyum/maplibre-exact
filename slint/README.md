@@ -12,14 +12,31 @@ box and ctrl-drag to rotate work.
 
 ## Using it
 
-The app's UI imports the map and its global from the library this crate ships, and exports the global:
+The app's UI imports the map and its global from the library this crate ships, and exports the global
+and the struct of markers' places:
 
 ```slint
-import { MapLibre, MapLibreMap } from "@maplibre/maplibre.slint";
-export { MapLibre }
+import { MapLibre, MapLibreMap, MapLibreMarker, MapLibreMarkerPlace } from "@maplibre/maplibre.slint";
+export { MapLibre, MapLibreMarkerPlace }
 
 export component App inherits Window {
     MapLibreMap { }
+}
+```
+
+`MapLibre.places` has the places of the content's markers, which the map sets after each frame that
+moved one. A `MapLibreMarker` given a place holds its children there, as GL JS's `Marker` holds an
+element: its anchor on the point, turned about it when the marker turns with the map, and hidden off
+the map or behind the globe. A marker that also lies on the pitched map stays unsquashed, since
+Slint scales an element before it turns it.
+
+```slint
+// in the content: "markers": {"station": {"lngLat": [8.5402, 47.3779], "anchor": "bottom"}}
+MapLibreMap {
+    for place in MapLibre.places: MapLibreMarker {
+        place: place;
+        if place.name == "station": Text { text: "Trains"; }
+    }
 }
 ```
 
@@ -45,15 +62,18 @@ app.run()?;
 ## Running the example
 
 [`examples/hello-map`](examples/hello-map) is a map of a few places in Zürich, which a tap names, with
-buttons that fly there, fit them in view and turn the globe on. It needs mln-rs next to this repository,
-as the core does.
+buttons that fly there, fit them in view and turn the globe on, and a callout over the station. It
+needs mln-rs next to this repository, as the core does.
 
 ```sh
 cargo run -p hello-map-slint
 HELLO_MAP_SNAPSHOTS=/tmp/hello-map cargo run -p hello-map-slint   # a short walk, saved as PNG files
 ```
 
+The walk's window has no frame and sits far past the edges of the screens, where the system leaves a
+frameless window, so nothing shows: its snapshots render on their own. It quits at once should the
+window land on a screen.
+
 ## Not done yet
 
-- Markers: Slint elements held at places on the map.
 - Windows, Linux, iOS and Android, where Slint also renders with wgpu.

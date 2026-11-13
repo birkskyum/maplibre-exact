@@ -40,6 +40,25 @@ pub struct Post {
 /// What a frame did on the host's device: whether the map wants another
 /// frame, what to post to the app, and the texture the map draws into when
 /// it is a new one, which the host shows from then on.
+/// Where a marker at a place puts its anchor, for a host whose app holds its
+/// own view there rather than the map holding it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkerPlace {
+    /// The marker's name in the content.
+    pub name: String,
+    /// The point its anchor goes to, in points from the map's top-left corner.
+    pub x: f32,
+    pub y: f32,
+    /// Off the map or behind the globe, or before the map drew.
+    pub hidden: bool,
+    /// Its anchor, as fractions of the view's width and height.
+    pub anchor: [f32; 2],
+    /// Degrees it turns clockwise, with the map when it turns with it.
+    pub rotate: f32,
+    /// How much it squashes as it lies on the pitched map, 1 upright.
+    pub squash: f32,
+}
+
 pub struct TextureFrame {
     pub again: bool,
     pub posts: Vec<Post>,
@@ -184,6 +203,44 @@ impl Component {
             scale: viewport.scale,
         };
         placement::place(&view, marker, frame)
+    }
+
+    /// Where the content's markers at places put their anchors, on the map as
+    /// its last frame drew it. A marker without a place stays where the
+    /// layout put it, so it has none.
+    #[must_use]
+    pub fn marker_places(&self) -> Vec<MarkerPlace> {
+        self.markers()
+            .iter()
+            .filter(|marker| marker.lng_lat.is_some())
+            .map(|marker| {
+                let anchor = marker.anchor.fraction().map(|n| n as f32);
+                // A view of no size: the translation is where the anchor goes.
+                match self.place(marker, [0.0; 4]) {
+                    Some(placement) if !placement.hidden => {
+                        let [a, b, x, c, d, y, ..] = placement.homography;
+                        MarkerPlace {
+                            name: marker.id.clone(),
+                            x,
+                            y,
+                            hidden: false,
+                            anchor,
+                            rotate: (-b).atan2(a).to_degrees(),
+                            squash: a * d - b * c,
+                        }
+                    }
+                    _ => MarkerPlace {
+                        name: marker.id.clone(),
+                        x: 0.0,
+                        y: 0.0,
+                        hidden: true,
+                        anchor,
+                        rotate: 0.0,
+                        squash: 1.0,
+                    },
+                }
+            })
+            .collect()
     }
 
     /// Why the map couldn't be made, if it couldn't.
@@ -578,6 +635,19 @@ mod tests {
         assert_eq!(state.inputs.options.max_zoom, Some(16.0));
         state.set_prop("events", None);
         assert_eq!(state.inputs.events, ALL_EVENTS.to_vec());
+    }
+
+    #[test]
+    fn markers_at_places_are_hidden_until_the_map_draws() {
+        let mut state = Component::new();
+        let markers =
+            serde_json::json!({"markers": {"station": {"lngLat": [8.54, 47.38], "anchor": "bottom"}, "compass": {}}});
+        state.set_prop("content", Some(&markers));
+        let places = state.marker_places();
+        assert_eq!(places.len(), 1, "a marker without a place stays where the layout put it");
+        assert_eq!(places[0].name, "station");
+        assert!(places[0].hidden);
+        assert_eq!(places[0].anchor, [0.5, 1.0]);
     }
 
     #[test]

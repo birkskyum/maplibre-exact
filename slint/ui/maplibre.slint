@@ -2,9 +2,25 @@
 // into `MapLibre.frame` and takes the input that `MapLibreMap` hands
 // `MapLibre`; the app connects the two (see `maplibre_slint::connect!`).
 
+// Where a marker of the content at a place goes, on the map as its last frame
+// drew it: the point its anchor goes to, its anchor as fractions of the
+// marker's width and height, and how far it turns clockwise.
+export struct MapLibreMarkerPlace {
+    name: string,
+    x: length,
+    y: length,
+    hidden: bool,
+    anchor-x: float,
+    anchor-y: float,
+    rotation: angle,
+}
+
 export global MapLibre {
     // The map's latest frame.
     in-out property <image> frame;
+    // The places of the content's markers, which the map sets after each
+    // frame that moved one.
+    in-out property <[MapLibreMarkerPlace]> places;
     // The map's size in logical pixels, which `MapLibreMap` keeps.
     in-out property <length> width;
     in-out property <length> height;
@@ -53,4 +69,21 @@ export component MapLibreMap inherits Rectangle {
     }
 
     @children
+}
+
+// Holds its children at a marker's place, inside a `MapLibreMap`: its anchor
+// on the point, turned about it, and hidden off the map or behind the globe.
+export component MapLibreMarker {
+    in property <MapLibreMarkerPlace> place;
+    width: content.preferred-width;
+    height: content.preferred-height;
+    x: self.place.x - self.width * self.place.anchor-x;
+    y: self.place.y - self.height * self.place.anchor-y;
+    visible: !self.place.hidden;
+    transform-rotation: self.place.rotation;
+    transform-origin: { x: self.width * self.place.anchor-x, y: self.height * self.place.anchor-y };
+
+    content := VerticalLayout {
+        @children
+    }
 }
