@@ -23,9 +23,9 @@ use mln_map::{
     MapView, TransformState,
 };
 use mln_runtime::{
-    AttachOptions, BorrowedRing, CameraFitArea, CameraFitOptions, Completion, ConsumerSync, DemandMode, Driver,
-    DriverWork, ErrorKind, EventMask, FrameDemand, FrameDisposition, GpuSync, LogicalExtent, MapOptions, MapSnapshot,
-    RenderSession, RenderTarget, RenderedQueryGeometry, RenderedQueryOptions, Runtime, RuntimeEventKind,
+    AcquiredFrame, AttachOptions, BorrowedRing, CameraFitArea, CameraFitOptions, Completion, ConsumerSync, DemandMode,
+    Driver, DriverWork, ErrorKind, EventMask, FrameDemand, FrameDisposition, GpuSync, LogicalExtent, MapOptions,
+    MapSnapshot, RenderSession, RenderTarget, RenderedQueryGeometry, RenderedQueryOptions, Runtime, RuntimeEventKind,
     RuntimeOptions, SourceInfo, SyncKind, SyncKinds,
 };
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -121,6 +121,10 @@ pub struct Engine {
     /// Whether the load waits for the sources' answer.
     load_pending: bool,
     animating: bool,
+    /// Whether the session renders into images it shares, whose frames the
+    /// host draws, and the newest of them, which the host hasn't taken yet.
+    shares_frames: bool,
+    newest: Option<AcquiredFrame>,
     click: Option<Click>,
     contextmenu: Option<Click>,
     error: Option<String>,
@@ -215,8 +219,11 @@ impl Engine {
         let jump = CameraUpdate { camera: camera_options(&everything(&inputs.camera)), ..Default::default() };
         let _jumped = map.update_camera(jump).map_err(fail)?;
         let hosts = matches!(driver, Driver::CallerThread);
-        let attach =
-            AttachOptions { driver, producer_sync_kinds: SyncKinds::of(&[SyncKind::QueueOrder]), ..Default::default() };
+        // A host draws a shared image only once the session's GPU work on it
+        // completed; on the host's own device, the queue's order suffices.
+        let shares_frames = matches!(target, RenderTarget::Exported { .. });
+        let producer = if shares_frames { SyncKind::CpuComplete } else { SyncKind::QueueOrder };
+        let attach = AttachOptions { driver, producer_sync_kinds: SyncKinds::of(&[producer]), ..Default::default() };
         let (session, _attached) = map.attach(target, attach).map_err(fail)?;
         let driver = if hosts { Some(session.take_driver_work().map_err(fail)?) } else { None };
         let snapshot = map.snapshot().map_err(fail)?;
@@ -248,6 +255,8 @@ impl Engine {
             loaded: false,
             load_pending: false,
             animating: false,
+            shares_frames,
+            newest: None,
             click: None,
             contextmenu: None,
             error: None,
@@ -572,7 +581,8 @@ impl Engine {
     /// Demands a frame of what changed, services the session, which renders
     /// it here, and gives the frame straight back: the surface's draw goes to
     /// the queue after the session's frame, and the session renders the next
-    /// one only on a later service.
+    /// one only on a later service. A session whose images the host draws
+    /// keeps the newest frame for it instead.
     fn render(&mut self) {
         self.demands += 1;
         let _ = self.session.demand_frame(FrameDemand::new(DemandMode::IfChanged, self.demands));
@@ -588,9 +598,21 @@ impl Engine {
                 self.drawn_update = result.map_update_generation;
             }
         }
-        if let Ok(Some(frame)) = self.session.acquire_frame() {
-            let _ = frame.release(ConsumerSync::of(GpuSync::of(SyncKind::QueueOrder)));
+        while let Ok(Some(frame)) = self.session.acquire_frame() {
+            if self.shares_frames {
+                // An older frame the host never took goes back as it drops.
+                self.newest = Some(frame);
+            } else {
+                let _ = frame.release(ConsumerSync::of(GpuSync::of(SyncKind::QueueOrder)));
+            }
         }
+    }
+
+    /// The newest frame of a session that renders into images it shares, for
+    /// the host to draw: it holds the frame until its own GPU work on it
+    /// completed, and drops it then, which gives it back.
+    pub fn take_frame(&mut self) -> Option<AcquiredFrame> {
+        self.newest.take()
     }
 
     /// Asks the session for the features the content's layers drew at
@@ -844,6 +866,7 @@ impl Drop for Engine {
     /// Stops the session here, since it renders only while this thread
     /// services it, and lets go of the map.
     fn drop(&mut self) {
+        self.newest = None;
         let _ = self.session.abandon();
         let _ = self.session.release();
         let _ = self.map.release();

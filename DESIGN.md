@@ -208,14 +208,25 @@ Five needs are met.
   map on the runtime's thread, so its camera reads the map's snapshot and sends the recognizer's
   deltas as commands, which takes implementing `GestureCamera` outside mln-rs.
 
+## What GPUI would need
+
+1. **BGRA surfaces in its Metal renderer.** GPUI draws an IOSurface where an element is, without a
+   copy, through its `surface` primitive, but only in the YCbCr format that video calls send, which
+   would smear the colours of a map's labels. The prototype draws BGRA surfaces too, with a second
+   pipeline whose fragment shader samples one texture ([`gpui/patches/zed`](gpui/patches/zed)).
+2. **Surfaces in its DirectX and wgpu renderers.** Its DirectX renderer takes surfaces and draws
+   none, and its wgpu renderer, on Linux and the web, takes none. mln-rs shares DXGI textures and
+   dmabufs, which those renderers would draw as the Metal one draws IOSurfaces.
+
 ## Where it runs
 
-- Slint, egui, Bevy and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
+- Slint, egui, Bevy, GPUI and Native Shell on macOS, and Whisker on the iOS simulator (iOS 26.5): the style, the
   content's places, `flyTo`, a tap naming a place and `fitBounds`, each in a scripted walk. Native
   Shell on the iOS simulator too, without the tap. Whisker on an Android 15 emulator, with the
   emulator's own touches: the buttons, a tap naming a place and a drag, with pauses past the
-  surface's ten seconds between them. The station's callout in Slint, egui, Bevy, Whisker and
-  Native Shell (on iOS), and on Whisker's iOS and Android also turned and tilted with the map.
+  surface's ten seconds between them. The station's callout in Slint, egui, Bevy, GPUI, Whisker and
+  Native Shell (on iOS), and on Whisker's iOS and Android also turned and tilted with the map. GPUI's
+  walk runs in its headless context, whose Metal renderer draws the map's IOSurfaces into its images.
 
 - Exact on macOS, iOS on an iPhone 17 Pro (iOS 27.2) and Android on a Pixel 9a, from the same surface: the
   style, the content's route and pins, `flyTo`, `fitBounds`, a tap selecting a pin, and the

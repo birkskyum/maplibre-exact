@@ -27,5 +27,9 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "../../mln-rs/crates/mln_webgpu
 # mln-rs's, which hosts that draw with wgpu share.
 wgpu = { version = "30.0.1", default-features = false }
 
+[features]
+# mln-rs's Metal backend, whose maps render into IOSurfaces that a host draws.
+metal = ["mln_runtime/metal"]
+
 [target.'cfg(target_os = "android")'.dependencies]
 raw-window-handle = "0.6.2"

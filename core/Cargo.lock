@@ -1518,6 +1518,22 @@ name = "mln-rs-math"
 version = "0.0.11"
 
 [[package]]
+name = "mln-rs-mtl"
+version = "0.0.11"
+dependencies = [
+ "bytemuck",
+ "mln-rs-gfx",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-io-surface",
+ "objc2-metal",
+ "objc2-quartz-core",
+]
+
+[[package]]
 name = "mln-rs-polylabel"
 version = "0.0.11"
 dependencies = [
@@ -1566,6 +1582,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-map",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -2022,6 +2039,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]

@@ -27,6 +27,9 @@ An early prototype. [DESIGN.md](DESIGN.md) says how it works and what is missing
   renderer. It runs on macOS. [Its README](egui/README.md) says how to use it.
 - [`bevy`](bevy) is `maplibre-bevy`, the map in [Bevy](https://bevyengine.org) apps, on a UI node
   drawn with Bevy's wgpu device. It runs on macOS. [Its README](bevy/README.md) says how to use it.
+- [`gpui`](gpui) is `maplibre-gpui`, the map in [GPUI](https://www.gpui.rs) apps, drawn by GPUI's
+  Metal renderer from the IOSurfaces the map renders into, with nothing copied. It runs on macOS, with
+  a change to GPUI. [Its README](gpui/README.md) says how to use it.
 - [`nsh`](nsh) is `maplibre-nsh`, the map in [Native Shell](https://nsh.dev) apps, as a native
   component whose view the map renders into. It runs on macOS and iOS. [Its README](nsh/README.md)
   says how to use it.

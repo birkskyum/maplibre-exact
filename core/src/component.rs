@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use mln_gestures::{Button, Input, Modifiers, PointerKind};
-use mln_runtime::{Device, Driver, RenderTarget};
+use mln_runtime::{AcquiredFrame, Device, Driver, ExportKind, ExportKinds, ExportedRing, RenderTarget};
 use mln_util::geo::ScreenCoordinate;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -57,6 +57,16 @@ pub struct MarkerPlace {
     pub rotate: f32,
     /// How much it squashes as it lies on the pitched map, 1 upright.
     pub squash: f32,
+}
+
+/// What a frame of a map that renders into images it shares gives the host.
+pub struct SharedFrame {
+    /// Whether the map wants another frame.
+    pub again: bool,
+    pub posts: Vec<Post>,
+    /// The newest image the map finished since the last frame, which the host
+    /// draws and drops once its own GPU work on it completed.
+    pub image: Option<AcquiredFrame>,
 }
 
 pub struct TextureFrame {
@@ -464,6 +474,29 @@ impl Component {
         TextureFrame { again, posts, texture: shown }
     }
 
+    /// Runs a frame for a map of `viewport` that renders, on a thread of its
+    /// own, into a ring of images it shares with the host, of the first of
+    /// `kinds` its device makes: IOSurfaces on Apple's platforms, dmabufs on
+    /// Linux. A ring of three lets the map render one while the host draws
+    /// another and holds a third.
+    pub fn frame_shared(&mut self, viewport: Viewport, kinds: &[ExportKind]) -> SharedFrame {
+        if self.viewport != Some(viewport) {
+            self.resize(Some(viewport));
+        }
+        let ring = ExportedRing {
+            depth: 3,
+            kinds: ExportKinds::of(kinds),
+            dma_buf_formats: Vec::new(),
+            android_hardware_buffer_usage: 0,
+            keep_depth: false,
+        };
+        let (again, posts) = self.frame(|viewport| {
+            Ok((RenderTarget::Exported { size: viewport.size, ring, device: None }, Driver::CoreWorker))
+        });
+        let image = self.engine.as_mut().and_then(Engine::take_frame);
+        SharedFrame { again, posts, image }
+    }
+
     fn now_ms(&self) -> f64 {
         self.epoch.elapsed().as_secs_f64() * 1000.0
     }
@@ -648,6 +681,29 @@ mod tests {
         assert_eq!(places[0].name, "station");
         assert!(places[0].hidden);
         assert_eq!(places[0].anchor, [0.5, 1.0]);
+    }
+
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    #[test]
+    fn a_map_renders_into_an_iosurface_it_shares() {
+        use mln_runtime::{ExportedImage, FrameTextureKind};
+        let mut state = Component::new();
+        let style = r##"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background", "paint": {"background-color": "#ff0000"}}]}"##;
+        state.set_prop("style", Some(&Json::from(style)));
+        let viewport = Viewport { size: Size::new(64, 48), scale: 2.0 };
+        let deadline = Instant::now() + std::time::Duration::from_secs(20);
+        let image = loop {
+            let frame = state.frame_shared(viewport, &[ExportKind::IoSurface]);
+            assert!(state.refused().is_none(), "{:?}", state.refused());
+            if let Some(image) = frame.image {
+                break image;
+            }
+            assert!(Instant::now() < deadline, "no frame came");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let texture = image.texture().expect("a shared frame has its image");
+        assert_eq!(texture.size, Size::new(128, 96));
+        assert!(matches!(texture.kind, FrameTextureKind::Exported(ExportedImage::IoSurface { .. })));
     }
 
     #[test]

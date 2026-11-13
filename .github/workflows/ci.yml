@@ -14,6 +14,8 @@ concurrency:
 
 env:
   MLN_RS: 1102a74c3c03039179feb1d9d182430a8264927f
+  # GPUI from Zed's repository, with the change in gpui/patches/zed.
+  ZED: dc93abce2fa6c0bf349d425310db4884aa953467
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -45,3 +47,38 @@ jobs:
       - name: Test
         working-directory: maplibre-rust-ui/${{ matrix.crate }}
         run: cargo test --workspace
+
+  gpui:
+    name: gpui
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: maplibre-rust-ui
+      - uses: actions/checkout@v7
+        with:
+          repository: louwers/mln-rs
+          ref: ${{ env.MLN_RS }}
+          path: mln-rs
+      - uses: actions/checkout@v7
+        with:
+          repository: zed-industries/zed
+          ref: ${{ env.ZED }}
+          path: zed
+      - name: Apply the GPUI change
+        run: git -C zed apply "$PWD"/maplibre-rust-ui/gpui/patches/zed/bgra-surfaces.diff
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: maplibre-rust-ui/gpui
+      - name: Format
+        working-directory: maplibre-rust-ui/gpui
+        run: cargo fmt --all --check
+      - name: Lint
+        working-directory: maplibre-rust-ui/gpui
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        working-directory: maplibre-rust-ui/gpui
+        run: cargo test --workspace
+      - name: Test the core's shared images
+        working-directory: maplibre-rust-ui/core
+        run: cargo test --features metal

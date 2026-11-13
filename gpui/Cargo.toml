@@ -1,0 +1,29 @@
+[package]
+name = "maplibre-gpui"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "MapLibre maps in GPUI apps, drawn by mln-rs into IOSurfaces that GPUI draws as they are"
+publish = false
+
+[workspace]
+members = ["examples/hello-map"]
+
+[dependencies]
+# GPUI from Zed's repository next to this one, with BGRA surfaces in its Metal renderer.
+gpui = { path = "../../zed/crates/gpui" }
+maplibre-rust-ui = { path = "../core", features = ["metal"] }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+# The versions GPUI takes, so that its CVPixelBuffer is this one.
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std"] }
+objc2-core-video = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+    "CVPixelBufferIOSurface",
+    "CVReturn",
+    "objc2-io-surface",
+] }
+objc2-io-surface = { version = "=0.3.2", default-features = false, features = ["std", "IOSurfaceRef"] }
